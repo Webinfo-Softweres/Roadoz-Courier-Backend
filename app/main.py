@@ -71,6 +71,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+from fastapi.staticfiles import StaticFiles
+
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+
 # ── Middleware ───────────────────────────────────────────────────────────────
 
 
