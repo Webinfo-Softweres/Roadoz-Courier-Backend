@@ -13,7 +13,7 @@ import uuid
 
 async def create_franchise(db: AsyncSession, data: FranchiseCreate) -> FranchiseResponse:
     # Check email uniqueness
-    result = await db.execute(select(User).where(User.email == data.email))
+    result = await db.execute(select(User).where(User.email == data.email_id))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
 
@@ -25,11 +25,11 @@ async def create_franchise(db: AsyncSession, data: FranchiseCreate) -> Franchise
     user_id = str(uuid.uuid4())
     user = User(
         id=user_id,
-        name=data.name,
-        email=data.email,
+        name=data.full_name,
+        email=data.email_id,
         password_hash=get_password_hash(data.password),
-        phone=data.phone,
-        address=data.address,
+        phone=data.mobile_number,
+        address=data.current_address,
         role=UserRole.FRANCHISE,
     )
     db.add(user)
@@ -39,10 +39,47 @@ async def create_franchise(db: AsyncSession, data: FranchiseCreate) -> Franchise
         id=str(uuid.uuid4()),
         user_id=user.id,
         franchise_code=data.franchise_code,
-        name=data.name,
-        email=data.email,
-        phone=data.phone,
-        address=data.address,
+        name=data.full_name,
+        email=data.email_id,
+        phone=data.mobile_number,
+        address=data.current_address,
+
+        date_of_birth=data.date_of_birth,
+        gender=data.gender,
+        current_address=data.current_address,
+        permanent_address=data.permanent_address,
+
+        proposed_location=data.proposed_location,
+        ownership_type=data.ownership_type,
+        detailed_business_address=data.detailed_business_address,
+        prior_experience=data.prior_experience,
+        years_active=data.years_active,
+
+        office_space_sqft=data.office_space_sqft,
+        office_ownership=data.office_ownership,
+        staff_count=data.staff_count,
+        internet_availability=data.internet_availability,
+        computer_laptop=data.computer_laptop,
+
+        investment_capacity=data.investment_capacity,
+        source_of_funds=data.source_of_funds,
+        bank_name=data.bank_name,
+        account_number=data.account_number,
+        existing_loans=data.existing_loans,
+
+        preferred_service_area=data.preferred_service_area,
+        nearby_landmark=data.nearby_landmark,
+        pin_codes_covered=data.pin_codes_covered,
+
+        doc_id_proof=data.doc_id_proof,
+        doc_address_proof=data.doc_address_proof,
+        doc_photographs=data.doc_photographs,
+        doc_business_registration=data.doc_business_registration,
+        doc_bank_statement=data.doc_bank_statement,
+
+        agree_to_terms=data.agree_to_terms,
+        submission_place=data.submission_place,
+        submission_date=data.submission_date,
     )
     db.add(franchise)
     await db.flush()
@@ -118,16 +155,44 @@ async def update_franchise(db: AsyncSession, franchise_id: str, data: FranchiseU
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Franchise not found")
 
     update_data = data.model_dump(exclude_unset=True)
+
+    if "email_id" in update_data and update_data["email_id"] != franchise.email:
+        result = await db.execute(select(User).where(User.email == update_data["email_id"]))
+        if result.scalar_one_or_none():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+
+    if "franchise_code" in update_data and update_data["franchise_code"] != franchise.franchise_code:
+        result = await db.execute(select(Franchise).where(Franchise.franchise_code == update_data["franchise_code"]))
+        if result.scalar_one_or_none():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Franchise code already in use")
+
+    if "full_name" in update_data:
+        franchise.name = update_data["full_name"]
+    if "email_id" in update_data:
+        franchise.email = update_data["email_id"]
+    if "mobile_number" in update_data:
+        franchise.phone = update_data["mobile_number"]
+    if "current_address" in update_data:
+        franchise.current_address = update_data["current_address"]
+        franchise.address = update_data["current_address"]
+
     for field, value in update_data.items():
+        if field in {"full_name", "email_id", "mobile_number", "current_address"}:
+            continue
         setattr(franchise, field, value)
 
     # Also update User record
     result = await db.execute(select(User).where(User.id == franchise.user_id))
     user = result.scalar_one_or_none()
     if user:
-        for field in ["name", "phone", "address"]:
-            if field in update_data:
-                setattr(user, field, update_data[field])
+        if "full_name" in update_data:
+            user.name = update_data["full_name"]
+        if "mobile_number" in update_data:
+            user.phone = update_data["mobile_number"]
+        if "email_id" in update_data:
+            user.email = update_data["email_id"]
+        if "current_address" in update_data:
+            user.address = update_data["current_address"]
 
     await db.flush()
     await cache_delete(f"franchise:{franchise_id}")

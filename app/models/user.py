@@ -20,13 +20,12 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     address: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    # Store role as plain String so SQLite doesn't need a native ENUM type
+    location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    profile_image: Mapped[str | None] = mapped_column(String(500), nullable=True)
     role: Mapped[str] = mapped_column(String(20), nullable=False, default=UserRole.FRANCHISE.value)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    location: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    profile_image: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     @property
     def role_enum(self) -> UserRole:
