@@ -121,6 +121,7 @@ app.add_middleware(
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 
+
 # ── Routers ──────────────────────────────────────────────────────────────────
 API_PREFIX = "/api/v1"
 app.include_router(auth.router,      prefix=API_PREFIX)
