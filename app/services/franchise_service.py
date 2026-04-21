@@ -1,14 +1,40 @@
 import json
 import math
+from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
 from fastapi import HTTPException, status
 from app.models.user import User, UserRole
 from app.models.franchise import Franchise
+from app.models.franchise_code_counter import FranchiseCodeCounter
 from app.schemas.franchise import FranchiseCreate, FranchiseUpdate, FranchiseResponse, FranchiseListResponse
 from app.core.security import get_password_hash
 from app.utils.redis import cache_set, cache_get, cache_delete
 import uuid
+
+
+async def _generate_franchise_code(db: AsyncSession, location: str) -> str:
+    year = datetime.utcnow().year
+    loc_code = (location or "")[:3].upper().ljust(3, "X")
+
+    result = await db.execute(
+        select(FranchiseCodeCounter)
+        .where(FranchiseCodeCounter.year == year)
+        .with_for_update()
+    )
+    counter = result.scalar_one_or_none()
+
+    if not counter:
+        counter = FranchiseCodeCounter(year=year, last_sequence=1)
+        db.add(counter)
+        sequence = 1
+    else:
+        counter.last_sequence += 1
+        sequence = counter.last_sequence
+
+    await db.flush()
+
+    return f"FR-{loc_code}-{year}-{str(sequence).zfill(4)}"
 
 
 async def create_franchise(db: AsyncSession, data: FranchiseCreate) -> FranchiseResponse:
@@ -17,10 +43,7 @@ async def create_franchise(db: AsyncSession, data: FranchiseCreate) -> Franchise
     if result.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
 
-    # Check franchise code uniqueness
-    result = await db.execute(select(Franchise).where(Franchise.franchise_code == data.franchise_code))
-    if result.scalar_one_or_none():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Franchise code already in use")
+    franchise_code = await _generate_franchise_code(db, data.proposed_location)
 
     user_id = str(uuid.uuid4())
     user = User(
@@ -38,7 +61,7 @@ async def create_franchise(db: AsyncSession, data: FranchiseCreate) -> Franchise
     franchise = Franchise(
         id=str(uuid.uuid4()),
         user_id=user.id,
-        franchise_code=data.franchise_code,
+        franchise_code=franchise_code,
         name=data.full_name,
         email=data.email_id,
         phone=data.mobile_number,
@@ -163,10 +186,7 @@ async def update_franchise(db: AsyncSession, franchise_id: str, data: FranchiseU
         if result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
 
-    if "franchise_code" in update_data and update_data["franchise_code"] != franchise.franchise_code:
-        result = await db.execute(select(Franchise).where(Franchise.franchise_code == update_data["franchise_code"]))
-        if result.scalar_one_or_none():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Franchise code already in use")
+    update_data.pop("franchise_code", None)
 
     if "full_name" in update_data:
         franchise.name = update_data["full_name"]

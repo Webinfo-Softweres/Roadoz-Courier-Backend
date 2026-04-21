@@ -12,7 +12,6 @@ class FranchiseCreate(BaseModel):
     password: str
     current_address: str
     permanent_address: Optional[str] = None
-    franchise_code: str
 
     proposed_location: str
     ownership_type: str
@@ -55,7 +54,6 @@ class FranchiseUpdate(BaseModel):
     email_id: Optional[EmailStr] = None
     current_address: Optional[str] = None
     permanent_address: Optional[str] = None
-    franchise_code: Optional[str] = None
 
     proposed_location: Optional[str] = None
     ownership_type: Optional[str] = None
