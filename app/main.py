@@ -19,6 +19,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 async def _seed_super_admin():
     """Create the super admin user if it doesn't already exist."""
     from app.core.database import AsyncSessionLocal
