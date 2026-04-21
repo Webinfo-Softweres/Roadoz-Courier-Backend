@@ -1,0 +1,32 @@
+name: Deploy Roadoz Backend
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Deploy to EC2 via SSH
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ${{ secrets.EC2_KEY }}
+        script: |
+          set -e
+          cd ~/Roadoz-Courier-Backend
+          git pull origin main
+          ./deploy.sh
+
+    - name: Send Telegram alert
+      run: |
+        curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+        -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+        -d text="🚀 Roadoz backend deployed successfully"
