@@ -127,7 +127,7 @@ async def get_franchises(
         data = json.loads(cached)
         return FranchiseListResponse(**data)
 
-    query = select(Franchise)
+    query = select(Franchise).order_by(Franchise.created_at.desc(), Franchise.id.desc())
     count_query = select(func.count()).select_from(Franchise)
 
     if search:
