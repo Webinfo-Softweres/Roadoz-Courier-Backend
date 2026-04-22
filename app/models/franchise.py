@@ -80,6 +80,8 @@ class Franchise(Base):
         server_default=text("0")
     )
 
+    existing_loan_details: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+
     # Area
     preferred_service_area: Mapped[str | None] = mapped_column(String(255), nullable=True)
     nearby_landmark: Mapped[str | None] = mapped_column(String(255), nullable=True)

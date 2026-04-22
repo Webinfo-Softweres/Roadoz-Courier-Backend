@@ -30,6 +30,7 @@ class FranchiseCreate(BaseModel):
     bank_name: str
     account_number: str
     existing_loans: bool = False
+    existing_loan_details: Optional[str] = None
 
     preferred_service_area: str
     nearby_landmark: Optional[str] = None
@@ -72,6 +73,7 @@ class FranchiseUpdate(BaseModel):
     bank_name: Optional[str] = None
     account_number: Optional[str] = None
     existing_loans: Optional[bool] = None
+    existing_loan_details: Optional[str] = None
 
     preferred_service_area: Optional[str] = None
     nearby_landmark: Optional[str] = None
@@ -119,6 +121,7 @@ class FranchiseResponse(BaseModel):
     bank_name: Optional[str]
     account_number: Optional[str]
     existing_loans: bool
+    existing_loan_details: Optional[str] = None
 
     preferred_service_area: Optional[str]
     nearby_landmark: Optional[str]

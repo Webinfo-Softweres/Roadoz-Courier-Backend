@@ -89,6 +89,7 @@ async def create_franchise(db: AsyncSession, data: FranchiseCreate) -> Franchise
         bank_name=data.bank_name,
         account_number=data.account_number,
         existing_loans=data.existing_loans,
+        existing_loan_details=data.existing_loan_details,
 
         preferred_service_area=data.preferred_service_area,
         nearby_landmark=data.nearby_landmark,
