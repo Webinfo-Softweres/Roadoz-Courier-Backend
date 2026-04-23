@@ -99,6 +99,11 @@ class Franchise(Base):
     submission_place: Mapped[str | None] = mapped_column(String(255), nullable=True)
     submission_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
+    # Employee counter — tracks last employee sequence for this franchise
+    employee_counter: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+
     # Meta
     is_active: Mapped[bool] = mapped_column(
         Boolean,
@@ -118,8 +123,11 @@ class Franchise(Base):
         server_default=text("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP")
     )
 
-    # Relationship
+    # Relationships
     user: Mapped["User"] = relationship("User", foreign_keys=[user_id])
+    employees: Mapped[list["User"]] = relationship(
+        "User", foreign_keys="User.franchise_id", back_populates="franchise", lazy="selectin"
+    )
 
     # Helpers
     @property

@@ -54,7 +54,19 @@ async def refresh_token(request: RefreshTokenRequest):
         "role_id": payload.get("role_id"),
         "role": payload.get("role"),
         "permissions": list(payload.get("permissions") or []),
+        "franchise_id": payload.get("franchise_id"),
+        "franchise_code": payload.get("franchise_code"),
     }
+
+    franchise_info = None
+    if payload.get("franchise_id"):
+        from app.schemas.auth import FranchiseInfo
+        franchise_info = FranchiseInfo(
+            id=payload["franchise_id"],
+            franchise_code=payload.get("franchise_code", ""),
+            name=payload.get("role", ""),
+        )
+
     return TokenResponse(
         access_token=create_access_token(token_data),
         refresh_token=create_refresh_token(token_data),
@@ -64,6 +76,7 @@ async def refresh_token(request: RefreshTokenRequest):
             else None
         ),
         permissions=list(payload.get("permissions") or []),
+        franchise=franchise_info,
     )
 
 

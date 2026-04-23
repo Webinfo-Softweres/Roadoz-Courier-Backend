@@ -22,12 +22,19 @@ class RoleCheckResponse(BaseModel):
     requires_franchise_code: bool
 
 
+class FranchiseInfo(BaseModel):
+    id: str
+    franchise_code: str
+    name: str
+
+
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
     role: Optional[RoleOut] = None
     permissions: list[str] = []
+    franchise: Optional[FranchiseInfo] = None
 
 
 class RefreshTokenRequest(BaseModel):

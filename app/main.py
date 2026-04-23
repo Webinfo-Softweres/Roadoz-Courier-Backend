@@ -60,11 +60,65 @@ async def _seed_super_admin():
         logger.info(f"Super admin ensured: {settings.SUPER_ADMIN_EMAIL}")
 
 
+# ── Default permission definitions (module, action, description) ───────────
+DEFAULT_PERMISSIONS = [
+    # Users
+    ("users", "create", "Create users"),
+    ("users", "view", "View users list"),
+    ("users", "edit", "Edit user details"),
+    ("users", "delete", "Delete users"),
+    # Roles
+    ("roles", "create", "Create roles"),
+    ("roles", "view", "View roles"),
+    ("roles", "edit", "Edit roles"),
+    ("roles", "delete", "Delete roles"),
+    # Permissions
+    ("permissions", "create", "Create permissions"),
+    ("permissions", "view", "View permissions"),
+    ("permissions", "edit", "Edit permissions"),
+    ("permissions", "delete", "Delete permissions"),
+    # User-role assignment
+    ("user_roles", "assign", "Assign role to user"),
+    # Franchises
+    ("franchises", "create", "Create franchises"),
+    ("franchises", "view", "View franchises"),
+    ("franchises", "edit", "Edit franchises"),
+    ("franchises", "delete", "Delete franchises"),
+    # Profile
+    ("profile", "view", "View own profile"),
+    ("profile", "edit", "Edit own profile"),
+]
+
+
+async def _seed_permissions():
+    """Seed the default permissions if they don't exist."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.permission import Permission
+    from sqlalchemy import select
+    import uuid
+
+    async with AsyncSessionLocal() as db:
+        for module, action, description in DEFAULT_PERMISSIONS:
+            code = f"{module}:{action}"
+            result = await db.execute(select(Permission).where(Permission.code == code))
+            if not result.scalar_one_or_none():
+                db.add(Permission(
+                    id=str(uuid.uuid4()),
+                    code=code,
+                    module=module,
+                    action=action,
+                    description=description,
+                ))
+        await db.commit()
+        logger.info("Default permissions seeded")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
     # init_db auto-creates all tables (works for SQLite out of the box)
     await init_db()
+    await _seed_permissions()
     await _seed_super_admin()
     yield
     logger.info("Shutting down")

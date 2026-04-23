@@ -9,6 +9,8 @@ class UserCreateRequest(BaseModel):
     password: str
     phone: Optional[str] = None
     pincode: Optional[str] = None
+    address: Optional[str] = None
+    location: Optional[str] = None
     is_active: bool = True
 
 
@@ -16,7 +18,14 @@ class UserUpdateRequest(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
     pincode: Optional[str] = None
+    address: Optional[str] = None
+    location: Optional[str] = None
     is_active: Optional[bool] = None
+
+
+class RoleInfo(BaseModel):
+    id: str
+    name: str
 
 
 class UserOut(BaseModel):
@@ -25,6 +34,11 @@ class UserOut(BaseModel):
     email: EmailStr
     phone: Optional[str] = None
     pincode: Optional[str] = None
+    address: Optional[str] = None
+    location: Optional[str] = None
+    franchise_id: Optional[str] = None
+    employee_code: Optional[str] = None
+    role: Optional[RoleInfo] = None
     is_active: bool
     created_at: datetime
     updated_at: datetime

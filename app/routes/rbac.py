@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +17,7 @@ from app.schemas.rbac_role import (
     RoleCreateRequest,
     RoleUpdateRequest,
     RoleWithPermissionsOut,
+    RoleListResponse,
 )
 from app.schemas.rbac_permission import (
     PermissionCreateRequest,
@@ -27,6 +30,7 @@ from app.services.rbac_service import (
     update_user,
     delete_user,
     create_role,
+    list_roles,
     get_role,
     update_role,
     delete_role,
@@ -47,21 +51,22 @@ router = APIRouter(prefix="/rbac", tags=["RBAC"])
 async def create_user_endpoint(
     data: UserCreateRequest,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
-    __: User = Depends(require_permission("users:create")),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("users:create")),
 ):
-    return await create_user(db, data)
+    return await create_user(db, data, current_user)
 
 
 @router.get("/users", response_model=UserListResponse)
 async def list_users_endpoint(
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100),
+    search: Optional[str] = Query(None, description="Search by name, email, phone, or employee code"),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
-    __: User = Depends(require_permission("users:view")),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("users:view")),
 ):
-    return await list_users(db, page=page, limit=limit)
+    return await list_users(db, current_user, page=page, limit=limit, search=search)
 
 
 @router.put("/users/{user_id}", response_model=UserOut)
@@ -69,20 +74,20 @@ async def update_user_endpoint(
     user_id: str,
     data: UserUpdateRequest,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
-    __: User = Depends(require_permission("users:edit")),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("users:edit")),
 ):
-    return await update_user(db, user_id, data)
+    return await update_user(db, user_id, data, current_user)
 
 
 @router.delete("/users/{user_id}")
 async def delete_user_endpoint(
     user_id: str,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
-    __: User = Depends(require_permission("users:delete")),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("users:delete")),
 ):
-    return await delete_user(db, user_id)
+    return await delete_user(db, user_id, current_user)
 
 
 # -------------------- Roles --------------------
@@ -96,6 +101,17 @@ async def create_role_endpoint(
     __: User = Depends(require_permission("roles:create")),
 ):
     return await create_role(db, data)
+
+
+@router.get("/roles", response_model=RoleListResponse)
+async def list_roles_endpoint(
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+    __: User = Depends(require_permission("roles:view")),
+):
+    return await list_roles(db, page=page, limit=limit)
 
 
 @router.get("/roles/{role_id}", response_model=RoleWithPermissionsOut)
@@ -179,7 +195,7 @@ async def delete_permission_endpoint(
 async def assign_role_endpoint(
     data: AssignRoleRequest,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
-    __: User = Depends(require_permission("user_roles:assign")),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("user_roles:assign")),
 ):
-    return await assign_role_to_user(db, data.user_id, data.role_id)
+    return await assign_role_to_user(db, data.user_id, data.role_id, current_user)

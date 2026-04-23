@@ -26,3 +26,11 @@ class RoleOut(BaseModel):
 
 class RoleWithPermissionsOut(RoleOut):
     permissions: list[str] = []
+
+
+class RoleListResponse(BaseModel):
+    items: list[RoleWithPermissionsOut]
+    total: int
+    page: int
+    limit: int
+    pages: int
