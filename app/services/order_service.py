@@ -1,0 +1,411 @@
+import math
+import uuid
+import logging
+from datetime import datetime
+
+from fastapi import HTTPException, status
+from sqlalchemy import select, func, or_
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.user import User
+from app.models.franchise import Franchise
+from app.models.pickup_address import PickupAddress
+from app.models.consignee import Consignee
+from app.models.order import Order, OrderItem, OrderPackage
+from app.models.role import Role
+from app.models.user_role import UserRole
+from app.schemas.order import (
+    PickupAddressCreate,
+    PickupAddressOut,
+    PickupAddressListResponse,
+    ConsigneeCreate,
+    ConsigneeOut,
+    ConsigneeListResponse,
+    OrderCreate,
+    OrderOut,
+    OrderItemOut,
+    OrderPackageOut,
+    OrderListResponse,
+    WeightSummary,
+)
+
+logger = logging.getLogger(__name__)
+
+VOL_DIVIDEND_B2C = 5000
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────
+
+
+async def _get_caller_role_name(db: AsyncSession, user_id: str) -> str | None:
+    row = await db.execute(
+        select(Role.name)
+        .join(UserRole, UserRole.role_id == Role.id)
+        .where(UserRole.user_id == user_id)
+    )
+    r = row.scalar_one_or_none()
+    return r.lower() if r else None
+
+
+async def _get_franchise_for_user(db: AsyncSession, user_id: str) -> Franchise | None:
+    result = await db.execute(select(Franchise).where(Franchise.user_id == user_id))
+    return result.scalar_one_or_none()
+
+
+async def _resolve_franchise_id(db: AsyncSession, user: User) -> str | None:
+    """Return franchise_id for the current user (owner or employee)."""
+    if user.franchise_id:
+        return user.franchise_id
+    franchise = await _get_franchise_for_user(db, user.id)
+    return franchise.id if franchise else None
+
+
+async def _generate_order_number(db: AsyncSession) -> str:
+    """Generate a sequential order number like ORD-00001."""
+    count = (await db.execute(select(func.count()).select_from(Order))).scalar_one()
+    return f"ORD-{str(count + 1).zfill(5)}"
+
+
+def _compute_weight_summary(packages: list[OrderPackage]) -> WeightSummary:
+    total_boxes = 0
+    total_weight = 0.0
+    total_vol = 0.0
+
+    for pkg in packages:
+        total_boxes += pkg.count
+        total_weight += float(pkg.physical_weight_kg) * pkg.count
+        total_vol += float(pkg.vol_weight_kg) * pkg.count
+
+    applicable = max(total_weight, total_vol)
+
+    return WeightSummary(
+        applicable_weight_kg=round(applicable, 2),
+        total_boxes=total_boxes,
+        total_weight_kg=round(total_weight, 2),
+        total_vol_weight_kg=round(total_vol, 2),
+    )
+
+
+def _build_order_out(order: Order) -> OrderOut:
+    ws = _compute_weight_summary(order.packages)
+    return OrderOut(
+        id=order.id,
+        order_number=order.order_number,
+        order_type=order.order_type,
+        pickup_address=PickupAddressOut.model_validate(order.pickup_address),
+        consignee=ConsigneeOut.model_validate(order.consignee),
+        payment_method=order.payment_method,
+        cod_amount=float(order.cod_amount) if order.cod_amount is not None else None,
+        to_pay_amount=float(order.to_pay_amount) if order.to_pay_amount is not None else None,
+        rov=order.rov,
+        order_value=float(order.order_value),
+        items=[OrderItemOut.model_validate(i) for i in order.items],
+        packages=[OrderPackageOut.model_validate(p) for p in order.packages],
+        weight_summary=ws,
+        gst_number=order.gst_number,
+        eway_bill_number=order.eway_bill_number,
+        status=order.status,
+        created_by=order.created_by,
+        franchise_id=order.franchise_id,
+        created_at=order.created_at,
+        updated_at=order.updated_at,
+    )
+
+
+# ── Pickup Address ─────────────────────────────────────────────────────────
+
+
+async def search_pickup_addresses(
+    db: AsyncSession, current_user: User, search: str | None = None
+) -> PickupAddressListResponse:
+    franchise_id = await _resolve_franchise_id(db, current_user)
+
+    query = select(PickupAddress)
+    count_query = select(func.count()).select_from(PickupAddress)
+
+    if franchise_id:
+        query = query.where(PickupAddress.franchise_id == franchise_id)
+        count_query = count_query.where(PickupAddress.franchise_id == franchise_id)
+    else:
+        query = query.where(PickupAddress.user_id == current_user.id)
+        count_query = count_query.where(PickupAddress.user_id == current_user.id)
+
+    if search:
+        search_filter = or_(
+            PickupAddress.nickname.ilike(f"%{search}%"),
+            PickupAddress.contact_name.ilike(f"%{search}%"),
+            PickupAddress.address_line_1.ilike(f"%{search}%"),
+            PickupAddress.city.ilike(f"%{search}%"),
+            PickupAddress.pincode.ilike(f"%{search}%"),
+        )
+        query = query.where(search_filter)
+        count_query = count_query.where(search_filter)
+
+    total = (await db.execute(count_query)).scalar_one()
+    result = await db.execute(query.order_by(PickupAddress.created_at.desc()).limit(50))
+    addresses = result.scalars().all()
+
+    return PickupAddressListResponse(
+        items=[PickupAddressOut.model_validate(a) for a in addresses],
+        total=total,
+    )
+
+
+async def create_pickup_address(
+    db: AsyncSession, data: PickupAddressCreate, current_user: User
+) -> PickupAddressOut:
+    franchise_id = await _resolve_franchise_id(db, current_user)
+
+    addr = PickupAddress(
+        id=str(uuid.uuid4()),
+        user_id=current_user.id,
+        franchise_id=franchise_id,
+        nickname=data.nickname,
+        contact_name=data.contact_name,
+        phone=data.phone,
+        email=data.email,
+        address_line_1=data.address_line_1,
+        address_line_2=data.address_line_2,
+        pincode=data.pincode,
+        city=data.city,
+        state=data.state,
+        country=data.country,
+    )
+    db.add(addr)
+    await db.flush()
+    await db.refresh(addr)
+    return PickupAddressOut.model_validate(addr)
+
+
+# ── Consignee ──────────────────────────────────────────────────────────────
+
+
+async def search_consignees(
+    db: AsyncSession, current_user: User, search: str | None = None
+) -> ConsigneeListResponse:
+    franchise_id = await _resolve_franchise_id(db, current_user)
+
+    query = select(Consignee)
+    count_query = select(func.count()).select_from(Consignee)
+
+    if franchise_id:
+        query = query.where(Consignee.franchise_id == franchise_id)
+        count_query = count_query.where(Consignee.franchise_id == franchise_id)
+    else:
+        query = query.where(Consignee.user_id == current_user.id)
+        count_query = count_query.where(Consignee.user_id == current_user.id)
+
+    if search:
+        search_filter = or_(
+            Consignee.name.ilike(f"%{search}%"),
+            Consignee.email.ilike(f"%{search}%"),
+            Consignee.mobile.ilike(f"%{search}%"),
+        )
+        query = query.where(search_filter)
+        count_query = count_query.where(search_filter)
+
+    total = (await db.execute(count_query)).scalar_one()
+    result = await db.execute(query.order_by(Consignee.created_at.desc()).limit(50))
+    consignees = result.scalars().all()
+
+    return ConsigneeListResponse(
+        items=[ConsigneeOut.model_validate(c) for c in consignees],
+        total=total,
+    )
+
+
+async def create_consignee(
+    db: AsyncSession, data: ConsigneeCreate, current_user: User
+) -> ConsigneeOut:
+    franchise_id = await _resolve_franchise_id(db, current_user)
+
+    consignee = Consignee(
+        id=str(uuid.uuid4()),
+        user_id=current_user.id,
+        franchise_id=franchise_id,
+        name=data.name,
+        mobile=data.mobile,
+        alternate_mobile=data.alternate_mobile,
+        email=data.email,
+        address_line_1=data.address_line_1,
+        address_line_2=data.address_line_2,
+        pincode=data.pincode,
+        city=data.city,
+        state=data.state,
+    )
+    db.add(consignee)
+    await db.flush()
+    await db.refresh(consignee)
+    return ConsigneeOut.model_validate(consignee)
+
+
+# ── Order ──────────────────────────────────────────────────────────────────
+
+
+async def create_order(
+    db: AsyncSession, data: OrderCreate, current_user: User
+) -> OrderOut:
+    # Validate pickup address exists and belongs to user / franchise
+    pickup = (
+        await db.execute(select(PickupAddress).where(PickupAddress.id == data.pickup_address_id))
+    ).scalar_one_or_none()
+    if not pickup:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pickup address not found")
+
+    # Validate consignee exists
+    consignee = (
+        await db.execute(select(Consignee).where(Consignee.id == data.consignee_id))
+    ).scalar_one_or_none()
+    if not consignee:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Consignee not found")
+
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    order_number = await _generate_order_number(db)
+
+    # Build order
+    order = Order(
+        id=str(uuid.uuid4()),
+        order_number=order_number,
+        order_type=data.order_type.value,
+        pickup_address_id=data.pickup_address_id,
+        consignee_id=data.consignee_id,
+        payment_method=data.payment_method.value,
+        cod_amount=data.cod_amount,
+        to_pay_amount=data.to_pay_amount,
+        rov=data.rov.value,
+        order_value=data.order_value,
+        gst_number=data.gst_number,
+        eway_bill_number=data.eway_bill_number,
+        status="pending",
+        created_by=current_user.id,
+        franchise_id=franchise_id,
+    )
+    db.add(order)
+    await db.flush()
+
+    # Add items
+    for item_data in data.items:
+        item = OrderItem(
+            id=str(uuid.uuid4()),
+            order_id=order.id,
+            product_name=item_data.product_name,
+            sku=item_data.sku,
+            unit_price=item_data.unit_price,
+            qty=item_data.qty,
+            total=item_data.total,
+        )
+        db.add(item)
+
+    # Add packages and compute weight summary
+    total_boxes = 0
+    total_weight = 0.0
+    total_vol = 0.0
+
+    for pkg_data in data.packages:
+        pkg = OrderPackage(
+            id=str(uuid.uuid4()),
+            order_id=order.id,
+            count=pkg_data.count,
+            length_cm=pkg_data.length_cm,
+            breadth_cm=pkg_data.breadth_cm,
+            height_cm=pkg_data.height_cm,
+            vol_weight_kg=pkg_data.vol_weight_kg,
+            physical_weight_kg=pkg_data.physical_weight_kg,
+        )
+        db.add(pkg)
+
+        total_boxes += pkg_data.count
+        total_weight += pkg_data.physical_weight_kg * pkg_data.count
+        total_vol += pkg_data.vol_weight_kg * pkg_data.count
+
+    applicable = max(total_weight, total_vol)
+
+    order.total_boxes = total_boxes
+    order.total_weight_kg = round(total_weight, 2)
+    order.total_vol_weight_kg = round(total_vol, 2)
+    order.applicable_weight_kg = round(applicable, 2)
+
+    await db.flush()
+
+    # Reload all columns (created_at, updated_at, etc.) + relationships
+    await db.refresh(order)
+    await db.refresh(order, attribute_names=["items", "packages", "pickup_address", "consignee"])
+
+    return _build_order_out(order)
+
+
+async def list_orders(
+    db: AsyncSession,
+    current_user: User,
+    page: int = 1,
+    limit: int = 10,
+    search: str | None = None,
+    status_filter: str | None = None,
+    order_type: str | None = None,
+) -> OrderListResponse:
+    caller_role = await _get_caller_role_name(db, current_user.id)
+
+    base_filters = []
+
+    # Scope: franchise users see only their franchise orders, non-franchise see their own
+    if caller_role != "super_admin":
+        franchise_id = await _resolve_franchise_id(db, current_user)
+        if franchise_id:
+            base_filters.append(Order.franchise_id == franchise_id)
+        else:
+            base_filters.append(Order.created_by == current_user.id)
+
+    if status_filter:
+        base_filters.append(Order.status == status_filter)
+    if order_type:
+        base_filters.append(Order.order_type == order_type)
+
+    query = select(Order).order_by(Order.created_at.desc())
+    count_query = select(func.count()).select_from(Order)
+
+    for f in base_filters:
+        query = query.where(f)
+        count_query = count_query.where(f)
+
+    if search:
+        search_filter = or_(
+            Order.order_number.ilike(f"%{search}%"),
+        )
+        query = query.where(search_filter)
+        count_query = count_query.where(search_filter)
+
+    total = (await db.execute(count_query)).scalar_one()
+    offset = (page - 1) * limit
+    result = await db.execute(query.offset(offset).limit(limit))
+    orders = result.scalars().all()
+
+    items = [_build_order_out(o) for o in orders]
+
+    return OrderListResponse(
+        items=items,
+        total=total,
+        page=page,
+        limit=limit,
+        pages=math.ceil(total / limit) if total > 0 else 0,
+    )
+
+
+async def get_order(
+    db: AsyncSession, order_id: str, current_user: User
+) -> OrderOut:
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+
+    # Access control
+    caller_role = await _get_caller_role_name(db, current_user.id)
+    if caller_role != "super_admin":
+        franchise_id = await _resolve_franchise_id(db, current_user)
+        if franchise_id:
+            if order.franchise_id != franchise_id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        elif order.created_by != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    return _build_order_out(order)

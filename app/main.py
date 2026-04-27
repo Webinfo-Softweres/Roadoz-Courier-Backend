@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.core.database import init_db
 from app.core.security import get_password_hash
 from app.middleware.auth_middleware import RequestLoggingMiddleware, SecurityHeadersMiddleware
-from app.routes import auth, franchise, profile, websocket, rbac
+from app.routes import auth, franchise, profile, websocket, rbac, order
 
 logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,
@@ -87,6 +87,15 @@ DEFAULT_PERMISSIONS = [
     # Profile
     ("profile", "view", "View own profile"),
     ("profile", "edit", "Edit own profile"),
+    # Orders
+    ("orders", "create", "Create orders"),
+    ("orders", "view", "View orders"),
+    # Pickup Addresses
+    ("pickup_addresses", "create", "Create pickup addresses"),
+    ("pickup_addresses", "view", "View pickup addresses"),
+    # Consignees
+    ("consignees", "create", "Create consignees"),
+    ("consignees", "view", "View consignees"),
 ]
 
 
@@ -198,6 +207,7 @@ app.include_router(auth.router,      prefix=API_PREFIX)
 app.include_router(franchise.router, prefix=API_PREFIX)
 app.include_router(profile.router,   prefix=API_PREFIX)
 app.include_router(rbac.router,      prefix=API_PREFIX)
+app.include_router(order.router,    prefix=API_PREFIX)
 app.include_router(websocket.router)
 
 
