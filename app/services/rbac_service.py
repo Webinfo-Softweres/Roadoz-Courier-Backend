@@ -160,34 +160,43 @@ async def list_users(
     caller_role = await _get_caller_role_name(db, current_user.id)
 
     base_filter = []
-    needs_user_role_join = False
 
-    if caller_role == "franchise":
+    if caller_role == "super_admin":
+        # Super admin can optionally filter by franchise_id
+        if franchise_id is not None:
+            if franchise_id == "none":
+                base_filter.append(User.franchise_id.is_(None))
+            else:
+                base_filter.append(User.franchise_id == franchise_id)
+    elif caller_role == "franchise":
         franchise = await _get_franchise_for_owner(db, current_user.id)
         if not franchise:
             return UserListResponse(items=[], total=0, page=page, limit=limit, pages=0)
         base_filter.append(User.franchise_id == franchise.id)
-    elif franchise_id is not None:
-        # Super admin filtering by specific franchise
-        if franchise_id == "none":
-            base_filter.append(User.franchise_id.is_(None))
+    else:
+        # Employee or other role — scope to own franchise
+        if current_user.franchise_id:
+            base_filter.append(User.franchise_id == current_user.franchise_id)
         else:
-            base_filter.append(User.franchise_id == franchise_id)
+            # No franchise association — only see themselves
+            base_filter.append(User.id == current_user.id)
 
     query = select(User).order_by(User.created_at.desc(), User.id.desc())
     count_query = select(func.count()).select_from(User)
 
-    # Filter by role name or assigned_by — both need user_roles join
-    if role or assigned_by:
-        needs_user_role_join = True
+    # Filter by role — INNER JOIN (only users who have that role)
+    if role:
         query = query.join(UserRole, UserRole.user_id == User.id)
         count_query = count_query.join(UserRole, UserRole.user_id == User.id)
-
-    if role:
         query = query.join(Role, Role.id == UserRole.role_id).where(Role.name == role)
         count_query = count_query.join(Role, Role.id == UserRole.role_id).where(Role.name == role)
-
-    if assigned_by:
+        if assigned_by:
+            query = query.where(UserRole.assigned_by == assigned_by)
+            count_query = count_query.where(UserRole.assigned_by == assigned_by)
+    elif assigned_by:
+        # OUTER JOIN so users without roles still appear
+        query = query.outerjoin(UserRole, UserRole.user_id == User.id)
+        count_query = count_query.outerjoin(UserRole, UserRole.user_id == User.id)
         query = query.where(UserRole.assigned_by == assigned_by)
         count_query = count_query.where(UserRole.assigned_by == assigned_by)
 
@@ -239,6 +248,19 @@ async def update_user(
                 status_code=status.HTTP_403_FORBIDDEN, detail="No franchise linked"
             )
         _assert_franchise_owns_user(franchise, user)
+    elif caller_role != "super_admin":
+        # Employee or other role — can only edit users in own franchise
+        if current_user.franchise_id:
+            if user.franchise_id != current_user.franchise_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You can only manage users in your franchise",
+                )
+        elif user.id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Permission denied",
+            )
 
     update_data = data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -271,6 +293,19 @@ async def delete_user(
                 status_code=status.HTTP_403_FORBIDDEN, detail="No franchise linked"
             )
         _assert_franchise_owns_user(franchise, user)
+    elif caller_role != "super_admin":
+        # Employee or other role — can only delete users in own franchise
+        if current_user.franchise_id:
+            if user.franchise_id != current_user.franchise_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You can only manage users in your franchise",
+                )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Permission denied",
+            )
 
     await db.delete(user)
     await db.flush()
@@ -480,6 +515,18 @@ async def assign_role_to_user(
             )
         _assert_franchise_owns_user(franchise, user)
         # Franchise cannot assign super_admin or franchise roles
+        if role.name.lower() in ("super_admin", "franchise"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot assign system roles",
+            )
+    elif caller_role != "super_admin":
+        # Employee or other role — can only assign within own franchise
+        if not current_user.franchise_id or user.franchise_id != current_user.franchise_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only assign roles to users in your franchise",
+            )
         if role.name.lower() in ("super_admin", "franchise"):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
