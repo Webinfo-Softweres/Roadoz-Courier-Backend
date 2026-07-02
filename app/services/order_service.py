@@ -790,6 +790,13 @@ async def create_order(
     order.is_gst_exempt = is_gst_exempt
     order.manual_freight_reason = None
 
+    if data.payment_method.value == "COD":
+        order.cod_amount = (data.cod_amount or 0.0) + data.order_value + pricing.total_freight
+    elif data.payment_method.value == "To Pay":
+        order.to_pay_amount = (data.to_pay_amount or 0.0) + pricing.total_freight
+    elif data.payment_method.value == "Credit":
+        order.credit_amount = (data.credit_amount or 0.0) + pricing.total_freight
+
     # Generate barcode from order number
     order.barcode = generate_barcode_base64(order_number)
 

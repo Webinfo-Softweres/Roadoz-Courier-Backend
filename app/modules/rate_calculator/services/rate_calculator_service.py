@@ -18,6 +18,80 @@ from app.models.rate_master import RateMaster
 logger = logging.getLogger(__name__)
 
 
+# ── Helper: Linear Interpolation Rate Calculator ───────────────────────────
+
+def calculate_exact_rate(applicable_weight: float, rate_rows: list) -> tuple[float, float]:
+    """
+    Calculate exact freight charge using linear interpolation between slabs.
+
+    Rules:
+      1. weight <= first slab  → return first slab rate (minimum rate)
+      2. weight == exact slab  → return that slab rate directly
+      3. weight between slabs  → linear interpolation between lower and upper slab
+      4. weight > last slab    → returns (0.0, 0.0) — caller must set is_manual_freight=True
+
+    Args:
+        applicable_weight: The chargeable weight in kg.
+        rate_rows: List of RateMaster rows sorted by weight_up_to ascending.
+
+    Returns:
+        (freight_charge, applied_weight_slab)
+    """
+    if not rate_rows:
+        return 0.0, 0.0
+
+    # Sort defensively (already sorted, but ensures correctness)
+    rows = sorted(rate_rows, key=lambda r: float(r.weight_up_to))
+
+    first = rows[0]
+    last = rows[-1]
+
+    # Rule 1: weight is at or below the first slab → minimum rate
+    if applicable_weight <= float(first.weight_up_to):
+        return round(float(first.base_rate), 2), float(first.weight_up_to)
+
+    # Rule 4: weight is above the largest slab → extrapolate using last two slabs
+    if applicable_weight > float(last.weight_up_to):
+        second_last      = rows[-2]
+        last_weight      = float(last.weight_up_to)
+        last_rate        = float(last.base_rate)
+        second_last_weight = float(second_last.weight_up_to)
+        second_last_rate   = float(second_last.base_rate)
+
+        price_per_kg = (last_rate - second_last_rate) / (last_weight - second_last_weight)
+        extra        = applicable_weight - last_weight
+        exact_rate   = last_rate + (extra * price_per_kg)
+
+        return round(exact_rate, 2), last_weight
+
+    # Rules 2 & 3: find the correct pair of slabs
+    for i in range(len(rows) - 1):
+        lower = rows[i]
+        upper = rows[i + 1]
+
+        lower_weight = float(lower.weight_up_to)
+        upper_weight = float(upper.weight_up_to)
+        lower_rate   = float(lower.base_rate)
+        upper_rate   = float(upper.base_rate)
+
+        if lower_weight < applicable_weight <= upper_weight:
+            # Rule 2: exactly on the upper slab
+            if applicable_weight == upper_weight:
+                return round(upper_rate, 2), upper_weight
+
+            # Rule 3: between two slabs — linear interpolation
+            price_per_kg = (upper_rate - lower_rate) / (upper_weight - lower_weight)
+            extra        = applicable_weight - lower_weight
+            exact_rate   = lower_rate + (extra * price_per_kg)
+
+            return round(exact_rate, 2), upper_weight
+
+    # Fallback (should never reach here)
+    return round(float(last.base_rate), 2), float(last.weight_up_to)
+
+
+# ── Rate Calculator Service ────────────────────────────────────────────────
+
 class RateCalculatorService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -43,24 +117,23 @@ class RateCalculatorService:
             payload.service_type.value, pickup.state, delivery.state
         )
         
-        if weights.chargeable_weight == 0:
-            is_manual_freight = False
-            base_rate = 0.0
-            applied_slab = 0.0
-        elif weights.chargeable_weight > 30.0:
-            is_manual_freight = True
-            base_rate = 0.0
-            applied_slab = 0.0
-        else:
-            is_manual_freight = False
-            rate_row = await self._get_rate_from_db(payload.service_type.value, zone, weights.chargeable_weight)
-            if not rate_row:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"No rate defined for Service: {payload.service_type.value}, Zone: {zone}, Weight: {weights.chargeable_weight}kg",
-                )
-            base_rate = float(rate_row.base_rate)
-            applied_slab = float(rate_row.weight_up_to)
+        is_manual_freight = False
+
+        # Fetch ALL rate rows for this service + zone (sorted ascending)
+        rate_rows = await self._get_all_rates_from_db(payload.service_type.value, zone)
+
+        if not rate_rows:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"No rate defined for Service: {payload.service_type.value}, Zone: {zone}",
+            )
+
+        base_rate, applied_slab = calculate_exact_rate(weights.chargeable_weight, rate_rows)
+
+        logger.info(
+            "Rate calculated weight=%.3fkg zone=%s base_rate=%.2f applied_slab=%.1f",
+            weights.chargeable_weight, zone, base_rate, applied_slab,
+        )
             
         if is_manual_freight:
             gst_amount = 0.0
@@ -113,17 +186,17 @@ class RateCalculatorService:
             
         return "Rest of India"
 
-    async def _get_rate_from_db(self, service_type: str, zone: str, weight: float):
+    async def _get_all_rates_from_db(self, service_type: str, zone: str) -> list:
+        """Fetch all RateMaster rows for a service + zone, sorted by weight_up_to ascending."""
         result = await self.db.execute(
             select(RateMaster).where(
                 and_(
                     RateMaster.service_type == service_type,
                     RateMaster.zone == zone,
-                    RateMaster.weight_up_to >= weight
                 )
-            ).order_by(RateMaster.weight_up_to.asc()).limit(1)
+            ).order_by(RateMaster.weight_up_to.asc())
         )
-        return result.scalar_one_or_none()
+        return result.scalars().all()
 
     async def _validate_serviceability(self, pincode: str, label: str):
         try:
