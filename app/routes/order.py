@@ -1266,6 +1266,45 @@ def get_redis_client():
 
 # ============= HELPER FUNCTIONS =============
 
+
+
+
+# import httpx
+# import os
+
+# HERE_API_KEY = os.getenv("HERE_API_KEY")  # Store in environment variable
+
+
+# async def get_pincode_from_lat_lng(lat: float, lng: float):
+#     """Get pincode from GPS coordinates using HERE Reverse Geocoding API"""
+#     try:
+#         url = "https://revgeocode.search.hereapi.com/v1/revgeocode"
+#         params = {"at": f"{lat},{lng}","lang": "en-US","apikey": HERE_API_KEY,}
+#         async with httpx.AsyncClient(timeout=10.0) as client:
+#             response = await client.get(url, params=params)
+#         if response.status_code != 200:
+#             print(f"HERE API Error: {response.status_code} - {response.text}")
+#             return None
+#         data = response.json()
+#         items = data.get("items", [])
+#         if not items:
+#             return None
+#         address = items[0].get("address", {})
+#         pincode = address.get("postalCode")
+#         if pincode:
+#             pincode = str(pincode).replace(".0", "").strip()
+#             pincode = "".join(filter(str.isdigit, pincode))
+#         return {
+#             "pincode": pincode,
+#             "city": (address.get("city")or address.get("district")or address.get("county")),
+#             "state": address.get("state"),
+#             "country": address.get("countryName"),}
+#     except Exception as e:
+#         print(f"HERE Geocoding error: {e}")
+#         return None
+
+
+
 async def get_pincode_from_lat_lng(lat: float, lng: float):
     """Get pincode from GPS coordinates"""
     try:
