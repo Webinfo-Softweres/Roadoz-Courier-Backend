@@ -242,7 +242,7 @@ class OrderCreate(BaseModel):
     credit_amount: Optional[float] = Field(None, ge=0, description="Required when payment_method is Credit")
     rov: ROV
 
-    order_value: float = Field(..., gt=0)
+    order_value: float = Field(..., ge=0)
 
     @model_validator(mode="after")
     def _validate_payment_amounts(self):
@@ -278,12 +278,15 @@ class OrderCreate(BaseModel):
     eway_bill_number: Optional[str] = Field(None, max_length=30)
     invoicenumber: Optional[int] = None
     amount: Optional[int] = None
-    insurance: float | None = 0
+    insurance: bool = False
     regional_area: float | None = 0
+    
+    is_doc: bool = False
+    delivery_type: Literal["office", "home"] = "office"
 
     @model_validator(mode="after")
-    def _validate_insurance(self):
-        if self.insurance and self.insurance > 0:
+    def _validate_insurance_bool(self):
+        if getattr(self, "insurance", False):
             if self.order_value <= 1000:
                 raise ValueError("Insurance can only be applied if the product value is above 1000.")
         return self
