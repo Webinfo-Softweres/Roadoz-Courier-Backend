@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, model_validator, computed_field
-from typing import Optional, List
+from typing import Optional, List, Literal
 from datetime import datetime
 from enum import Enum
 from app.models.order import OrderStatus
@@ -181,11 +181,28 @@ class OrderItemOut(BaseModel):
 
 class OrderPackageCreate(BaseModel):
     count: int = Field(0, ge=0, description="Number of boxes")
-    length_cm: float = Field(..., ge=0)
-    breadth_cm: float = Field(..., ge=0)
-    height_cm: float = Field(..., ge=0)
-    vol_weight_kg: float = Field(..., ge=0, description="Volumetric weight (B2C dividend 5000)")
-    physical_weight_kg: float = Field(..., ge=0)
+    length_cm: float = Field(0.0, ge=0)
+    breadth_cm: float = Field(0.0, ge=0)
+    height_cm: float = Field(0.0, ge=0)
+    weight_unit: Literal["kg", "g"] = Field("kg", description="Unit for physical and volumetric weight")
+    physical_weight: float = Field(..., ge=0)
+    vol_weight: float = Field(0.0, ge=0, description="Volumetric weight")
+
+    @computed_field
+    @property
+    def physical_weight_kg(self) -> float:
+        if self.weight_unit == "g":
+            return self.physical_weight / 1000.0
+        return self.physical_weight
+
+    @computed_field
+    @property
+    def vol_weight_kg(self) -> float:
+        if self.length_cm > 0 and self.breadth_cm > 0 and self.height_cm > 0:
+            return (self.length_cm * self.breadth_cm * self.height_cm) / 5000.0
+        if self.weight_unit == "g":
+            return self.vol_weight / 1000.0
+        return self.vol_weight
 
 
 class OrderPackageOut(BaseModel):
@@ -264,6 +281,12 @@ class OrderCreate(BaseModel):
     insurance: float | None = 0
     regional_area: float | None = 0
 
+    @model_validator(mode="after")
+    def _validate_insurance(self):
+        if self.insurance and self.insurance > 0:
+            if self.order_value <= 1000:
+                raise ValueError("Insurance can only be applied if the product value is above 1000.")
+        return self
 
 # ── Order Response ─────────────────────────────────────────────────────────
 

@@ -364,6 +364,14 @@ Login Details:
   Password: {data.password}
   Franchise Code: {franchise.franchise_code}
 
+Login Link (Use this exact link to log in):
+  https://admin.roadozcourier.com/
+
+Please use the above credentials to access your Roadoz Courier franchise account.
+
+Important: Your Email, Password, and Franchise Code are unique to your account. Please keep them confidential and do not share them with anyone. If you believe your credentials have been compromised, please change your password immediately or contact the Roadoz Courier support team.
+Please use the above link to access your Roadoz Courier franchise account.  
+
 Thank you,
 Roadoz Courier Team
         """
