@@ -745,6 +745,7 @@ async def create_order(
             unit_price=item_data.unit_price,
             qty=item_data.qty,
             total=item_data.total,
+            package_index=item_data.package_index,
         )
         db.add(item)
 
@@ -753,11 +754,12 @@ async def create_order(
     total_weight = 0.0
     total_vol = 0.0
 
-    for pkg_data in data.packages:
+    for idx, pkg_data in enumerate(data.packages, start=1):
         pkg = OrderPackage(
             id=str(uuid.uuid4()),
             order_id=order.id,
             count=pkg_data.count,
+            package_index=idx,
             length_cm=pkg_data.length_cm,
             breadth_cm=pkg_data.breadth_cm,
             height_cm=pkg_data.height_cm,
@@ -1999,6 +2001,9 @@ async def update_order(
             "pickup_address_id",
             "consignee_id",
             "warehouse_addresses_id",
+            "cod_amount",
+            "to_pay_amount",
+            "credit_amount",
         ]:
             continue
 
@@ -2041,6 +2046,7 @@ async def update_order(
                 unit_price=item_data.unit_price,
                 qty=item_data.qty,
                 total=item_data.total,
+                package_index=item_data.package_index,
             )
 
             db.add(item)
@@ -2060,12 +2066,13 @@ async def update_order(
         total_weight = 0.0
         total_vol = 0.0
 
-        for pkg_data in data.packages:
+        for idx, pkg_data in enumerate(data.packages, start=1):
 
             pkg = OrderPackage(
                 id=str(uuid.uuid4()),
                 order_id=order.id,
                 count=pkg_data.count,
+                package_index=idx,
                 length_cm=pkg_data.length_cm,
                 breadth_cm=pkg_data.breadth_cm,
                 height_cm=pkg_data.height_cm,
@@ -2151,6 +2158,34 @@ async def update_order(
         order.pricing_zone = pricing.zone
         order.is_manual_freight = pricing.is_manual_freight
 
+    # Finalize payment amounts
+    base_cod = data.cod_amount if data.cod_amount is not None else (float(order.cod_amount or 0) - float(order.order_value) - float(order.total_freight))
+    base_to_pay = data.to_pay_amount if data.to_pay_amount is not None else (float(order.to_pay_amount or 0) - float(order.total_freight))
+    base_credit = data.credit_amount if data.credit_amount is not None else (float(order.credit_amount or 0) - float(order.total_freight))
+
+    if order.payment_method == "COD":
+        order.cod_amount = max(0.0, base_cod) + float(order.order_value) + float(order.total_freight)
+        order.to_pay_amount = None
+        order.credit_amount = None
+        order.prepaid_amount = None
+    elif order.payment_method == "To Pay":
+        order.to_pay_amount = max(0.0, base_to_pay) + float(order.total_freight)
+        order.cod_amount = None
+        order.credit_amount = None
+        order.prepaid_amount = None
+    elif order.payment_method == "Credit":
+        order.credit_amount = max(0.0, base_credit) + float(order.total_freight)
+        order.cod_amount = None
+        order.to_pay_amount = None
+        order.prepaid_amount = None
+    elif order.payment_method == "Prepaid":
+        order.prepaid_amount = float(order.total_freight)
+        order.cod_amount = None
+        order.to_pay_amount = None
+        order.credit_amount = None
+
+    if getattr(order, "insurance", 0) > 0:
+        order.insurance = round(float(order.order_value) * 0.018, 2)
 
     order.barcode = generate_barcode_base64(
         order.order_number
