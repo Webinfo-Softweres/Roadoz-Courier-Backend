@@ -54,11 +54,11 @@ from sqlalchemy.orm import Session
 
 import openpyxl
 from io import BytesIO
-from app.schemas.rate_calculator import RateCalculationRequest, RatePackageInput
+from app.schemas.rate_calculator import RateCalculationRequest, RatePackageInput, PricingBreakdown
 from app.services.rate_calculator.rate_calculator_service import calculate_rate
 logger = logging.getLogger(__name__)
 
-VOL_DIVIDEND_B2C = 5000
+VOL_DIVIDEND_B2C = 2700
 
 
 def _normalize_payment_mode(payment_method: str) -> str:
@@ -123,7 +123,21 @@ async def calculate_order_shipping_charge(
     order_value: float,
     packages: list,
     is_gst_exempt: bool = False,
+    is_doc: bool = False,
+    delivery_type: str = "office",
 ):
+    if is_doc:
+        base_rate = 60.0 if delivery_type == "office" else 120.0
+        gst_amount = 0.0 if is_gst_exempt else round(base_rate * 0.18, 2)
+        total_freight = round(base_rate + gst_amount, 2)
+        return PricingBreakdown(
+            freight_charge=base_rate,
+            freight_gst=gst_amount,
+            total_freight=total_freight,
+            is_manual_freight=False,
+            zone="Anywhere",
+            applied_weight_slab=0.0
+        )
     if str(order_type).strip() == "International":
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -697,7 +711,7 @@ async def create_order(
         eway_bill_number=data.eway_bill_number,
         invoicenumber=data.invoicenumber,
         amount=data.amount,
-        insurance=data.insurance,
+        insurance=(round(data.order_value * 0.018, 2) if data.insurance else 0.0),
         regional_area=data.regional_area,
         status=OrderStatus.PROCESSING,
         previous_status=OrderStatus.PROCESSING,
@@ -731,6 +745,7 @@ async def create_order(
             unit_price=item_data.unit_price,
             qty=item_data.qty,
             total=item_data.total,
+            package_index=item_data.package_index,
         )
         db.add(item)
 
@@ -739,11 +754,12 @@ async def create_order(
     total_weight = 0.0
     total_vol = 0.0
 
-    for pkg_data in data.packages:
+    for idx, pkg_data in enumerate(data.packages, start=1):
         pkg = OrderPackage(
             id=str(uuid.uuid4()),
             order_id=order.id,
             count=pkg_data.count,
+            package_index=idx,
             length_cm=pkg_data.length_cm,
             breadth_cm=pkg_data.breadth_cm,
             height_cm=pkg_data.height_cm,
@@ -778,6 +794,8 @@ async def create_order(
         order_value=data.order_value,
         packages=data.packages,
         is_gst_exempt=is_gst_exempt,
+        is_doc=data.is_doc,
+        delivery_type=data.delivery_type,
     )
 
     order.service_type = data.service_type.value
@@ -789,6 +807,13 @@ async def create_order(
     order.is_manual_freight = pricing.is_manual_freight
     order.is_gst_exempt = is_gst_exempt
     order.manual_freight_reason = None
+
+    if data.payment_method.value == "COD":
+        order.cod_amount = (data.cod_amount or 0.0) + data.order_value + pricing.total_freight
+    elif data.payment_method.value == "To Pay":
+        order.to_pay_amount = (data.to_pay_amount or 0.0) + pricing.total_freight
+    elif data.payment_method.value == "Credit":
+        order.credit_amount = (data.credit_amount or 0.0) + pricing.total_freight
 
     # Generate barcode from order number
     order.barcode = generate_barcode_base64(order_number)
@@ -903,7 +928,7 @@ async def process_bulk_excel_upload(
                         float(get_val("length_cm") or 1) *
                         float(get_val("breadth_cm") or 1) *
                         float(get_val("height_cm") or 1)
-                    ) / 5000,
+                    ) / 2700,
                     "physical_weight_kg": float(get_val("physical_weight_kg") or 1)
                 }],
                 shipping_charge=0
@@ -1976,6 +2001,9 @@ async def update_order(
             "pickup_address_id",
             "consignee_id",
             "warehouse_addresses_id",
+            "cod_amount",
+            "to_pay_amount",
+            "credit_amount",
         ]:
             continue
 
@@ -2018,6 +2046,7 @@ async def update_order(
                 unit_price=item_data.unit_price,
                 qty=item_data.qty,
                 total=item_data.total,
+                package_index=item_data.package_index,
             )
 
             db.add(item)
@@ -2037,12 +2066,13 @@ async def update_order(
         total_weight = 0.0
         total_vol = 0.0
 
-        for pkg_data in data.packages:
+        for idx, pkg_data in enumerate(data.packages, start=1):
 
             pkg = OrderPackage(
                 id=str(uuid.uuid4()),
                 order_id=order.id,
                 count=pkg_data.count,
+                package_index=idx,
                 length_cm=pkg_data.length_cm,
                 breadth_cm=pkg_data.breadth_cm,
                 height_cm=pkg_data.height_cm,
@@ -2128,6 +2158,34 @@ async def update_order(
         order.pricing_zone = pricing.zone
         order.is_manual_freight = pricing.is_manual_freight
 
+    # Finalize payment amounts
+    base_cod = data.cod_amount if data.cod_amount is not None else (float(order.cod_amount or 0) - float(order.order_value) - float(order.total_freight))
+    base_to_pay = data.to_pay_amount if data.to_pay_amount is not None else (float(order.to_pay_amount or 0) - float(order.total_freight))
+    base_credit = data.credit_amount if data.credit_amount is not None else (float(order.credit_amount or 0) - float(order.total_freight))
+
+    if order.payment_method == "COD":
+        order.cod_amount = max(0.0, base_cod) + float(order.order_value) + float(order.total_freight)
+        order.to_pay_amount = None
+        order.credit_amount = None
+        order.prepaid_amount = None
+    elif order.payment_method == "To Pay":
+        order.to_pay_amount = max(0.0, base_to_pay) + float(order.total_freight)
+        order.cod_amount = None
+        order.credit_amount = None
+        order.prepaid_amount = None
+    elif order.payment_method == "Credit":
+        order.credit_amount = max(0.0, base_credit) + float(order.total_freight)
+        order.cod_amount = None
+        order.to_pay_amount = None
+        order.prepaid_amount = None
+    elif order.payment_method == "Prepaid":
+        order.prepaid_amount = float(order.total_freight)
+        order.cod_amount = None
+        order.to_pay_amount = None
+        order.credit_amount = None
+
+    if getattr(order, "insurance", 0) > 0:
+        order.insurance = round(float(order.order_value) * 0.018, 2)
 
     order.barcode = generate_barcode_base64(
         order.order_number

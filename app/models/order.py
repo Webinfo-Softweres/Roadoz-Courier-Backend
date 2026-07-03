@@ -87,6 +87,7 @@ class Order(Base):
     # Payment
     payment_method: Mapped[str] = mapped_column(String(20), nullable=False)  # COD | Prepaid | To Pay | Credit
     cod_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)  # required when COD
+    prepaid_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)  # required when Prepaid
     to_pay_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)  # required when To Pay
     credit_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)  # required when Credit
     rov: Mapped[str] = mapped_column(String(20), nullable=False)  # owner_risk | carrier_risk
@@ -215,6 +216,7 @@ class OrderItem(Base):
     unit_price: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
     qty: Mapped[int] = mapped_column(Integer, nullable=False)
     total: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    package_index: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 0-based index into the order's packages list
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False,default=indian_time,
@@ -233,6 +235,7 @@ class OrderPackage(Base):
     )
 
     count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    package_index: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 1-based position in order's package list
     length_cm: Mapped[float] = mapped_column(Numeric(8, 2), nullable=False)
     breadth_cm: Mapped[float] = mapped_column(Numeric(8, 2), nullable=False)
     height_cm: Mapped[float] = mapped_column(Numeric(8, 2), nullable=False)

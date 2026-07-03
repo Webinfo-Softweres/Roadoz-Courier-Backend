@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, model_validator, computed_field
-from typing import Optional, List
+from typing import Optional, List, Literal
 from datetime import datetime
 from enum import Enum
 from app.models.order import OrderStatus
@@ -160,9 +160,10 @@ class ConsigneeStatusUpdate(BaseModel):
 class OrderItemCreate(BaseModel):
     product_name: str = Field(..., min_length=1, max_length=255)
     # sku: Optional[str] = Field(None, max_length=100)
-    unit_price: float = Field(..., gt=0)
+    unit_price: float = Field(..., ge=0)
     qty: int = Field(..., ge=1)
-    total: float = Field(..., gt=0)
+    total: float = Field(..., ge=0)
+    package_index: Optional[int] = Field(None, ge=1, description="1-based index of the package this item belongs to (1 = first package, 2 = second package, etc.)")
 
 
 class OrderItemOut(BaseModel):
@@ -172,6 +173,7 @@ class OrderItemOut(BaseModel):
     unit_price: float
     qty: int
     total: float
+    package_index: Optional[int] = None
 
     model_config = {"from_attributes": True}
 
@@ -181,11 +183,40 @@ class OrderItemOut(BaseModel):
 
 class OrderPackageCreate(BaseModel):
     count: int = Field(0, ge=0, description="Number of boxes")
-    length_cm: float = Field(..., ge=0)
-    breadth_cm: float = Field(..., ge=0)
-    height_cm: float = Field(..., ge=0)
-    vol_weight_kg: float = Field(..., ge=0, description="Volumetric weight (B2C dividend 5000)")
-    physical_weight_kg: float = Field(..., ge=0)
+    length_cm: float = Field(0.0, ge=0)
+    breadth_cm: float = Field(0.0, ge=0)
+    height_cm: float = Field(0.0, ge=0)
+    weight_unit: Literal["kg", "g"] = Field("kg", description="Unit for physical and volumetric weight")
+    physical_weight: float | None = Field(None, ge=0)
+    vol_weight: float | None = Field(None, ge=0, description="Volumetric weight")
+
+    @model_validator(mode="after")
+    def _enforce_weight_logic(self):
+        if self.weight_unit == "kg":
+            self.vol_weight = None
+        elif self.weight_unit == "g":
+            self.physical_weight = None
+        return self
+
+    @computed_field
+    @property
+    def physical_weight_kg(self) -> float:
+        pw = self.physical_weight or 0.0
+        if self.weight_unit == "g":
+            return pw / 1000.0
+        return pw
+
+    @computed_field
+    @property
+    def vol_weight_kg(self) -> float:
+        if not self.physical_weight and not self.vol_weight:
+            if self.length_cm > 0 and self.breadth_cm > 0 and self.height_cm > 0:
+                return (self.length_cm * self.breadth_cm * self.height_cm) / 2700.0
+                
+        vw = self.vol_weight or 0.0
+        if self.weight_unit == "g":
+            return vw / 1000.0
+        return vw
 
 
 class OrderPackageOut(BaseModel):
@@ -196,6 +227,7 @@ class OrderPackageOut(BaseModel):
     height_cm: float
     vol_weight_kg: float
     physical_weight_kg: float
+    package_index: Optional[int] = None
 
     model_config = {"from_attributes": True}
 
@@ -225,7 +257,7 @@ class OrderCreate(BaseModel):
     credit_amount: Optional[float] = Field(None, ge=0, description="Required when payment_method is Credit")
     rov: ROV
 
-    order_value: float = Field(..., gt=0)
+    order_value: float = Field(..., ge=0)
 
     @model_validator(mode="after")
     def _validate_payment_amounts(self):
@@ -261,9 +293,18 @@ class OrderCreate(BaseModel):
     eway_bill_number: Optional[str] = Field(None, max_length=30)
     invoicenumber: Optional[int] = None
     amount: Optional[int] = None
-    insurance: float | None = 0
+    insurance: bool = False
     regional_area: float | None = 0
+    
+    is_doc: bool = False
+    delivery_type: Literal["office", "home"] | None = None
 
+    @model_validator(mode="after")
+    def _validate_insurance_bool(self):
+        if getattr(self, "insurance", False):
+            if self.order_value < 1000:
+                raise ValueError("Insurance can only be applied if the product value is 1000 or above.")
+        return self
 
 # ── Order Response ─────────────────────────────────────────────────────────
 
