@@ -54,7 +54,7 @@ from sqlalchemy.orm import Session
 
 import openpyxl
 from io import BytesIO
-from app.schemas.rate_calculator import RateCalculationRequest, RatePackageInput
+from app.schemas.rate_calculator import RateCalculationRequest, RatePackageInput, PricingBreakdown
 from app.services.rate_calculator.rate_calculator_service import calculate_rate
 logger = logging.getLogger(__name__)
 
@@ -123,7 +123,21 @@ async def calculate_order_shipping_charge(
     order_value: float,
     packages: list,
     is_gst_exempt: bool = False,
+    is_doc: bool = False,
+    delivery_type: str = "office",
 ):
+    if is_doc:
+        base_rate = 60.0 if delivery_type == "office" else 120.0
+        gst_amount = 0.0 if is_gst_exempt else round(base_rate * 0.18, 2)
+        total_freight = round(base_rate + gst_amount, 2)
+        return PricingBreakdown(
+            freight_charge=base_rate,
+            freight_gst=gst_amount,
+            total_freight=total_freight,
+            is_manual_freight=False,
+            zone="Anywhere",
+            applied_weight_slab=0.0
+        )
     if str(order_type).strip() == "International":
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -697,7 +711,7 @@ async def create_order(
         eway_bill_number=data.eway_bill_number,
         invoicenumber=data.invoicenumber,
         amount=data.amount,
-        insurance=data.insurance,
+        insurance=(round(data.order_value * 0.18, 2) if data.insurance else 0.0),
         regional_area=data.regional_area,
         status=OrderStatus.PROCESSING,
         previous_status=OrderStatus.PROCESSING,
@@ -778,6 +792,8 @@ async def create_order(
         order_value=data.order_value,
         packages=data.packages,
         is_gst_exempt=is_gst_exempt,
+        is_doc=data.is_doc,
+        delivery_type=data.delivery_type,
     )
 
     order.service_type = data.service_type.value
