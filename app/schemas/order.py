@@ -163,6 +163,7 @@ class OrderItemCreate(BaseModel):
     unit_price: float = Field(..., ge=0)
     qty: int = Field(..., ge=1)
     total: float = Field(..., ge=0)
+    package_index: Optional[int] = Field(None, ge=1, description="1-based index of the package this item belongs to (1 = first package, 2 = second package, etc.)")
 
 
 class OrderItemOut(BaseModel):
@@ -172,6 +173,7 @@ class OrderItemOut(BaseModel):
     unit_price: float
     qty: int
     total: float
+    package_index: Optional[int] = None
 
     model_config = {"from_attributes": True}
 
@@ -225,6 +227,7 @@ class OrderPackageOut(BaseModel):
     height_cm: float
     vol_weight_kg: float
     physical_weight_kg: float
+    package_index: Optional[int] = None
 
     model_config = {"from_attributes": True}
 
