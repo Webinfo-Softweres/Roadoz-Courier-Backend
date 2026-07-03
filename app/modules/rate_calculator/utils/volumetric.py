@@ -1,4 +1,4 @@
-DEFAULT_VOLUMETRIC_DIVISOR = 5000.0
+DEFAULT_VOLUMETRIC_DIVISOR = 2700.0
 
 
 def calculate_volumetric_weight(

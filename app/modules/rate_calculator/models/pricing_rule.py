@@ -24,7 +24,7 @@ class PricingRule(Base):
     fuel_surcharge_percent: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, server_default=text("0"))
     insurance_percent: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, server_default=text("0"))
     gst_percent: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, server_default=text("18"))
-    volumetric_divisor: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, server_default=text("5000"))
+    volumetric_divisor: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, server_default=text("2700"))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("1"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default=text("CURRENT_TIMESTAMP"))
     updated_at: Mapped[datetime] = mapped_column(
