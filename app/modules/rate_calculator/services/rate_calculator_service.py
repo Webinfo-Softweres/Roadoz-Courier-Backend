@@ -111,7 +111,7 @@ class RateCalculatorService:
             delivery.state,
         )
 
-        weights = self.weight_engine.calculate(payload, divisor=5000.0)
+        weights = self.weight_engine.calculate(payload, divisor=2700.0)
         
         zone = self._determine_zone(
             payload.service_type.value, pickup.state, delivery.state

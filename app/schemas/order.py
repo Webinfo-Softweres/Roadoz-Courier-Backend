@@ -185,24 +185,36 @@ class OrderPackageCreate(BaseModel):
     breadth_cm: float = Field(0.0, ge=0)
     height_cm: float = Field(0.0, ge=0)
     weight_unit: Literal["kg", "g"] = Field("kg", description="Unit for physical and volumetric weight")
-    physical_weight: float = Field(..., ge=0)
-    vol_weight: float = Field(0.0, ge=0, description="Volumetric weight")
+    physical_weight: float | None = Field(None, ge=0)
+    vol_weight: float | None = Field(None, ge=0, description="Volumetric weight")
+
+    @model_validator(mode="after")
+    def _enforce_weight_logic(self):
+        if self.weight_unit == "kg":
+            self.vol_weight = None
+        elif self.weight_unit == "g":
+            self.physical_weight = None
+        return self
 
     @computed_field
     @property
     def physical_weight_kg(self) -> float:
+        pw = self.physical_weight or 0.0
         if self.weight_unit == "g":
-            return self.physical_weight / 1000.0
-        return self.physical_weight
+            return pw / 1000.0
+        return pw
 
     @computed_field
     @property
     def vol_weight_kg(self) -> float:
-        if self.length_cm > 0 and self.breadth_cm > 0 and self.height_cm > 0:
-            return (self.length_cm * self.breadth_cm * self.height_cm) / 5000.0
+        if not self.physical_weight and not self.vol_weight:
+            if self.length_cm > 0 and self.breadth_cm > 0 and self.height_cm > 0:
+                return (self.length_cm * self.breadth_cm * self.height_cm) / 2700.0
+                
+        vw = self.vol_weight or 0.0
         if self.weight_unit == "g":
-            return self.vol_weight / 1000.0
-        return self.vol_weight
+            return vw / 1000.0
+        return vw
 
 
 class OrderPackageOut(BaseModel):

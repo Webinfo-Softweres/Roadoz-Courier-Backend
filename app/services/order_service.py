@@ -58,7 +58,7 @@ from app.schemas.rate_calculator import RateCalculationRequest, RatePackageInput
 from app.services.rate_calculator.rate_calculator_service import calculate_rate
 logger = logging.getLogger(__name__)
 
-VOL_DIVIDEND_B2C = 5000
+VOL_DIVIDEND_B2C = 2700
 
 
 def _normalize_payment_mode(payment_method: str) -> str:
@@ -926,7 +926,7 @@ async def process_bulk_excel_upload(
                         float(get_val("length_cm") or 1) *
                         float(get_val("breadth_cm") or 1) *
                         float(get_val("height_cm") or 1)
-                    ) / 5000,
+                    ) / 2700,
                     "physical_weight_kg": float(get_val("physical_weight_kg") or 1)
                 }],
                 shipping_charge=0
