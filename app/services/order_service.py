@@ -711,7 +711,7 @@ async def create_order(
         eway_bill_number=data.eway_bill_number,
         invoicenumber=data.invoicenumber,
         amount=data.amount,
-        insurance=(round(data.order_value * 0.18, 2) if data.insurance else 0.0),
+        insurance=(round(data.order_value * 0.018, 2) if data.insurance else 0.0),
         regional_area=data.regional_area,
         status=OrderStatus.PROCESSING,
         previous_status=OrderStatus.PROCESSING,

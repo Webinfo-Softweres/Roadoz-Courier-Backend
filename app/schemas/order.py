@@ -287,8 +287,8 @@ class OrderCreate(BaseModel):
     @model_validator(mode="after")
     def _validate_insurance_bool(self):
         if getattr(self, "insurance", False):
-            if self.order_value <= 1000:
-                raise ValueError("Insurance can only be applied if the product value is above 1000.")
+            if self.order_value < 1000:
+                raise ValueError("Insurance can only be applied if the product value is 1000 or above.")
         return self
 
 # ── Order Response ─────────────────────────────────────────────────────────
