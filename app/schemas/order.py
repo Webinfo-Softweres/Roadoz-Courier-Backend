@@ -160,9 +160,9 @@ class ConsigneeStatusUpdate(BaseModel):
 class OrderItemCreate(BaseModel):
     product_name: str = Field(..., min_length=1, max_length=255)
     # sku: Optional[str] = Field(None, max_length=100)
-    unit_price: float = Field(..., gt=0)
+    unit_price: float = Field(..., ge=0)
     qty: int = Field(..., ge=1)
-    total: float = Field(..., gt=0)
+    total: float = Field(..., ge=0)
 
 
 class OrderItemOut(BaseModel):
@@ -282,7 +282,7 @@ class OrderCreate(BaseModel):
     regional_area: float | None = 0
     
     is_doc: bool = False
-    delivery_type: Literal["office", "home"] = "office"
+    delivery_type: Literal["office", "home"] | None = None
 
     @model_validator(mode="after")
     def _validate_insurance_bool(self):
