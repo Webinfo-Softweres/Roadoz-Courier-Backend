@@ -268,6 +268,7 @@ def _build_order_out(order: Order) -> OrderOut:
         cod_amount=float(order.cod_amount) if order.cod_amount is not None else None,
         to_pay_amount=float(order.to_pay_amount) if order.to_pay_amount is not None else None,
         credit_amount=float(order.credit_amount) if order.credit_amount is not None else None,
+        prepaid_amount=float(order.prepaid_amount) if order.prepaid_amount is not None else None,
         rov=order.rov,
         order_value=float(order.order_value),
         items=[OrderItemOut.model_validate(i) for i in order.items],
@@ -705,6 +706,7 @@ async def create_order(
         cod_amount=data.cod_amount,
         to_pay_amount=data.to_pay_amount,
         credit_amount=data.credit_amount,
+        prepaid_amount=data.prepaid_amount,
         rov=data.rov.value,
         order_value=data.order_value,
         gst_number=data.gst_number,
@@ -783,37 +785,56 @@ async def create_order(
     can_exempt_gst = (caller_role == "super_admin") or ("orders:create" in user_permissions)
     is_gst_exempt = data.is_gst_exempt if can_exempt_gst else False
 
-    pricing = await calculate_order_shipping_charge(
-        db,
-        order_type=data.order_type.value,
-        service_type=data.service_type.value,
-        pickup_pincode=pickup.pincode,
-        delivery_pincode=consignee.pincode,
-        payment_method=data.payment_method.value,
-        rov=data.rov.value,
-        order_value=data.order_value,
-        packages=data.packages,
-        is_gst_exempt=is_gst_exempt,
-        is_doc=data.is_doc,
-        delivery_type=data.delivery_type,
-    )
+    if data.is_manual_freight:
+        order.service_type = data.service_type.value
+        order.freight_charge = data.freight_charge or 0.0
+        
+        # Calculate GST automatically for manual freight
+        if is_gst_exempt:
+            order.freight_gst = 0.0
+        else:
+            order.freight_gst = round(order.freight_charge * 0.18, 2)
+            
+        order.total_freight = round(order.freight_charge + order.freight_gst, 2)
+        order.applied_weight_slab = None
+        order.pricing_zone = None
+        order.is_manual_freight = True
+        order.is_gst_exempt = is_gst_exempt
+        order.manual_freight_reason = "Manual override"
+    else:
+        pricing = await calculate_order_shipping_charge(
+            db,
+            order_type=data.order_type.value,
+            service_type=data.service_type.value,
+            pickup_pincode=pickup.pincode,
+            delivery_pincode=consignee.pincode,
+            payment_method=data.payment_method.value,
+            rov=data.rov.value,
+            order_value=data.order_value,
+            packages=data.packages,
+            is_gst_exempt=is_gst_exempt,
+            is_doc=data.is_doc,
+            delivery_type=data.delivery_type,
+        )
 
-    order.service_type = data.service_type.value
-    order.freight_charge = pricing.freight_charge
-    order.freight_gst = pricing.freight_gst
-    order.total_freight = pricing.total_freight
-    order.applied_weight_slab = pricing.applied_weight_slab
-    order.pricing_zone = pricing.zone
-    order.is_manual_freight = pricing.is_manual_freight
-    order.is_gst_exempt = is_gst_exempt
-    order.manual_freight_reason = None
+        order.service_type = data.service_type.value
+        order.freight_charge = pricing.freight_charge
+        order.freight_gst = pricing.freight_gst
+        order.total_freight = pricing.total_freight
+        order.applied_weight_slab = pricing.applied_weight_slab
+        order.pricing_zone = pricing.zone
+        order.is_manual_freight = pricing.is_manual_freight
+        order.is_gst_exempt = is_gst_exempt
+        order.manual_freight_reason = None
 
     if data.payment_method.value == "COD":
-        order.cod_amount = (data.cod_amount or 0.0) + data.order_value + pricing.total_freight
+        order.cod_amount = (data.cod_amount or 0.0) + data.order_value + float(order.total_freight)
     elif data.payment_method.value == "To Pay":
-        order.to_pay_amount = (data.to_pay_amount or 0.0) + pricing.total_freight
+        order.to_pay_amount = (data.to_pay_amount or 0.0) + float(order.total_freight)
     elif data.payment_method.value == "Credit":
-        order.credit_amount = (data.credit_amount or 0.0) + pricing.total_freight
+        order.credit_amount = (data.credit_amount or 0.0) + float(order.total_freight)
+    elif data.payment_method.value == "Prepaid":
+        order.prepaid_amount = (data.prepaid_amount or 0.0) + float(order.total_freight)
 
     # Generate barcode from order number
     order.barcode = generate_barcode_base64(order_number)

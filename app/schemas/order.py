@@ -255,6 +255,7 @@ class OrderCreate(BaseModel):
     cod_amount: Optional[float] = Field(None, ge=0, description="Required when payment_method is COD")
     to_pay_amount: Optional[float] = Field(None, ge=0, description="Required when payment_method is To Pay")
     credit_amount: Optional[float] = Field(None, ge=0, description="Required when payment_method is Credit")
+    prepaid_amount: Optional[float] = Field(None, ge=0, description="Required when payment_method is Prepaid")
     rov: ROV
 
     order_value: float = Field(..., ge=0)
@@ -267,16 +268,21 @@ class OrderCreate(BaseModel):
             raise ValueError("to_pay_amount is required when payment_method is To Pay")
         if self.payment_method == PaymentMethod.CREDIT and self.credit_amount is None:
             raise ValueError("credit_amount is required when payment_method is Credit")
+        if self.payment_method == PaymentMethod.PREPAID and self.prepaid_amount is None:
+            raise ValueError("prepaid_amount is required when payment_method is Prepaid")
             
         if self.payment_method == PaymentMethod.COD:
             self.to_pay_amount = None
             self.credit_amount = None
+            self.prepaid_amount = None
         elif self.payment_method == PaymentMethod.TO_PAY:
             self.cod_amount = None
             self.credit_amount = None
+            self.prepaid_amount = None
         elif self.payment_method == PaymentMethod.CREDIT:
             self.cod_amount = None
             self.to_pay_amount = None
+            self.prepaid_amount = None
         elif self.payment_method == PaymentMethod.PREPAID:
             self.cod_amount = None
             self.to_pay_amount = None
@@ -288,6 +294,9 @@ class OrderCreate(BaseModel):
 
     service_type: ServiceType = Field(ServiceType.SURFACE)
     is_gst_exempt: Optional[bool] = Field(False, description="Optional GST exemption for users with orders:create permission")
+
+    is_manual_freight: bool = False
+    freight_charge: Optional[float] = Field(None, ge=0, description="Required if is_manual_freight is True")
 
     gst_number: Optional[str] = Field(None, max_length=20)
     eway_bill_number: Optional[str] = Field(None, max_length=30)
@@ -319,6 +328,7 @@ class OrderOut(BaseModel):
     cod_amount: Optional[float] = None
     to_pay_amount: Optional[float] = None
     credit_amount: Optional[float] = None
+    prepaid_amount: Optional[float] = None
     rov: str
     order_value: float
     items: List[OrderItemOut]
@@ -352,6 +362,21 @@ class OrderOut(BaseModel):
     @property
     def shipping_charge(self) -> float:
         return self.total_freight
+
+    @computed_field
+    @property
+    def grand_total(self) -> float:
+        total = (self.freight_charge or 0.0) + (self.freight_gst or 0.0) + (self.regional_area or 0.0) + (self.insurance or 0.0)
+        pm = str(self.payment_method).upper() if self.payment_method else ""
+        if pm == "COD":
+            total += (self.cod_amount or 0.0)
+        elif pm in ("TO PAY", "TO_PAY"):
+            total += (self.to_pay_amount or 0.0)
+        elif pm == "CREDIT":
+            total += (self.credit_amount or 0.0)
+        elif pm == "PREPAID":
+            total += (self.prepaid_amount or 0.0)
+        return total
 
 
 class OrderListResponse(BaseModel):
