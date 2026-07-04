@@ -827,14 +827,16 @@ async def create_order(
         order.is_gst_exempt = is_gst_exempt
         order.manual_freight_reason = None
 
+    # Store amounts exactly as entered by user — freight is shown separately
+    # grand_total computed field in schema handles the full sum for display
     if data.payment_method.value == "COD":
-        order.cod_amount = (data.cod_amount or 0.0) + data.order_value + float(order.total_freight)
+        order.cod_amount = data.cod_amount
     elif data.payment_method.value == "To Pay":
-        order.to_pay_amount = (data.to_pay_amount or 0.0) + float(order.total_freight)
+        order.to_pay_amount = data.to_pay_amount
     elif data.payment_method.value == "Credit":
-        order.credit_amount = (data.credit_amount or 0.0) + float(order.total_freight)
+        order.credit_amount = data.credit_amount
     elif data.payment_method.value == "Prepaid":
-        order.prepaid_amount = (data.prepaid_amount or 0.0) + float(order.total_freight)
+        order.prepaid_amount = data.prepaid_amount
 
     # Generate barcode from order number
     order.barcode = generate_barcode_base64(order_number)
