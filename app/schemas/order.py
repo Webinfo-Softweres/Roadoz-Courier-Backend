@@ -222,6 +222,7 @@ class OrderPackageCreate(BaseModel):
 class OrderPackageOut(BaseModel):
     id: str
     count: int
+    weight_unit: str
     length_cm: float
     breadth_cm: float
     height_cm: float
@@ -230,6 +231,14 @@ class OrderPackageOut(BaseModel):
     package_index: Optional[int] = None
 
     model_config = {"from_attributes": True}
+
+    @computed_field
+    @property
+    def applicable_weight_kg(self) -> float:
+        """Returns vol_weight_kg if weight was entered in grams, physical_weight_kg if in kg."""
+        if self.weight_unit == "g":
+            return self.vol_weight_kg
+        return self.physical_weight_kg
 
 
 # ── Weight Summary (read-only, computed) ───────────────────────────────────
@@ -464,6 +473,7 @@ class OrderUpdate(BaseModel):
     cod_amount: Optional[float] = None
     to_pay_amount: Optional[float] = None
     credit_amount: Optional[float] = None
+    prepaid_amount: Optional[float] = None
 
     rov: Optional[ROV] = None
 
@@ -475,6 +485,12 @@ class OrderUpdate(BaseModel):
     service_type: Optional[ServiceType] = None
     is_gst_exempt: Optional[bool] = Field(None, description="Optional GST exemption for users with orders:create permission")
     total_freight: Optional[float] = None
+
+    is_doc: Optional[bool] = None
+    delivery_type: Optional[Literal["office", "home"]] = None
+
+    is_manual_freight: Optional[bool] = None
+    freight_charge: Optional[float] = Field(None, ge=0, description="Manual freight charge, used if is_manual_freight is True")
 
     items: Optional[List[OrderItemCreate]] = None
     packages: Optional[List[OrderPackageCreate]] = None
