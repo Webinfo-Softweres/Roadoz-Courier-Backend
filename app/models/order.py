@@ -236,6 +236,7 @@ class OrderPackage(Base):
 
     count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     package_index: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 1-based position in order's package list
+    weight_unit: Mapped[str] = mapped_column(String(5), nullable=False, server_default=text("'kg'"))  # 'kg' or 'g'
     length_cm: Mapped[float] = mapped_column(Numeric(8, 2), nullable=False)
     breadth_cm: Mapped[float] = mapped_column(Numeric(8, 2), nullable=False)
     height_cm: Mapped[float] = mapped_column(Numeric(8, 2), nullable=False)

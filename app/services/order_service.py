@@ -762,6 +762,7 @@ async def create_order(
             order_id=order.id,
             count=pkg_data.count,
             package_index=idx,
+            weight_unit=pkg_data.weight_unit,
             length_cm=pkg_data.length_cm,
             breadth_cm=pkg_data.breadth_cm,
             height_cm=pkg_data.height_cm,
@@ -2027,11 +2028,16 @@ async def update_order(
             "cod_amount",
             "to_pay_amount",
             "credit_amount",
+            "prepaid_amount",
+            "is_manual_freight",
+            "freight_charge",
+            "is_doc",
+            "delivery_type",
         ]:
             continue
 
         # Handle enum values
-        if field in ["order_type", "payment_method", "rov"]:
+        if field in ["order_type", "payment_method", "rov", "service_type"]:
             setattr(order, field, value.value)
 
         else:
@@ -2096,6 +2102,7 @@ async def update_order(
                 order_id=order.id,
                 count=pkg_data.count,
                 package_index=idx,
+                weight_unit=pkg_data.weight_unit,
                 length_cm=pkg_data.length_cm,
                 breadth_cm=pkg_data.breadth_cm,
                 height_cm=pkg_data.height_cm,
@@ -2125,7 +2132,9 @@ async def update_order(
     rate_affecting_fields = [
         "order_type", "service_type", "pickup_address_id", 
         "consignee_id", "payment_method", "rov", 
-        "order_value", "packages", "is_gst_exempt"
+        "order_value", "packages", "is_gst_exempt",
+        "is_manual_freight", "freight_charge",
+        "is_doc", "delivery_type"
     ]
     
     update_data_keys = data.model_dump(exclude_unset=True).keys()
@@ -2144,11 +2153,12 @@ async def update_order(
             current_packages = [
                 OrderPackageCreate(
                     count=p.count,
+                    weight_unit=p.weight_unit,
                     length_cm=p.length_cm,
                     breadth_cm=p.breadth_cm,
                     height_cm=p.height_cm,
-                    vol_weight_kg=p.vol_weight_kg,
-                    physical_weight_kg=p.physical_weight_kg
+                    vol_weight=float(p.vol_weight_kg * 1000) if p.weight_unit == 'g' else None,
+                    physical_weight=float(p.physical_weight_kg) if p.weight_unit == 'kg' else None,
                 ) for p in existing_pkgs
             ]
             
@@ -2161,48 +2171,67 @@ async def update_order(
         else:
             is_gst_exempt = order.is_gst_exempt
             
-        pricing = await calculate_order_shipping_charge(
-            db,
-            order_type=order.order_type,
-            service_type=order.service_type,
-            pickup_pincode=pickup_addr.pincode,
-            delivery_pincode=consignee_addr.pincode,
-            payment_method=order.payment_method,
-            rov=order.rov,
-            order_value=order.order_value,
-            packages=current_packages,
-            is_gst_exempt=is_gst_exempt,
-        )
+        is_manual = data.is_manual_freight if data.is_manual_freight is not None else order.is_manual_freight
         
-        order.freight_charge = pricing.freight_charge
-        order.freight_gst = pricing.freight_gst
-        order.total_freight = pricing.total_freight
-        order.applied_weight_slab = pricing.applied_weight_slab
-        order.pricing_zone = pricing.zone
-        order.is_manual_freight = pricing.is_manual_freight
+        if is_manual:
+            freight_charge = data.freight_charge if data.freight_charge is not None else order.freight_charge
+            order.freight_charge = freight_charge
+            
+            if is_gst_exempt:
+                order.freight_gst = 0.0
+            else:
+                order.freight_gst = round(freight_charge * 0.18, 2)
+                
+            order.total_freight = round(order.freight_charge + order.freight_gst, 2)
+            order.applied_weight_slab = None
+            order.pricing_zone = None
+            order.is_manual_freight = True
+            order.is_gst_exempt = is_gst_exempt
+            order.manual_freight_reason = "Manual override"
+        else:
+            pricing = await calculate_order_shipping_charge(
+                db,
+                order_type=order.order_type,
+                service_type=order.service_type,
+                pickup_pincode=pickup_addr.pincode,
+                delivery_pincode=consignee_addr.pincode,
+                payment_method=order.payment_method,
+                rov=order.rov,
+                order_value=order.order_value,
+                packages=current_packages,
+                is_gst_exempt=is_gst_exempt,
+                is_doc=data.is_doc if data.is_doc is not None else False,
+                delivery_type=data.delivery_type if data.delivery_type is not None else "office",
+            )
+            
+            order.freight_charge = pricing.freight_charge
+            order.freight_gst = pricing.freight_gst
+            order.total_freight = pricing.total_freight
+            order.applied_weight_slab = pricing.applied_weight_slab
+            order.pricing_zone = pricing.zone
+            order.is_manual_freight = pricing.is_manual_freight
+            order.is_gst_exempt = is_gst_exempt
+            order.manual_freight_reason = None
 
-    # Finalize payment amounts
-    base_cod = data.cod_amount if data.cod_amount is not None else (float(order.cod_amount or 0) - float(order.order_value) - float(order.total_freight))
-    base_to_pay = data.to_pay_amount if data.to_pay_amount is not None else (float(order.to_pay_amount or 0) - float(order.total_freight))
-    base_credit = data.credit_amount if data.credit_amount is not None else (float(order.credit_amount or 0) - float(order.total_freight))
-
+    # Store amounts exactly as entered — no calculation added
+    # grand_total computed field in schema handles the full sum for display
     if order.payment_method == "COD":
-        order.cod_amount = max(0.0, base_cod) + float(order.order_value) + float(order.total_freight)
+        order.cod_amount = data.cod_amount if data.cod_amount is not None else order.cod_amount
         order.to_pay_amount = None
         order.credit_amount = None
         order.prepaid_amount = None
     elif order.payment_method == "To Pay":
-        order.to_pay_amount = max(0.0, base_to_pay) + float(order.total_freight)
+        order.to_pay_amount = data.to_pay_amount if data.to_pay_amount is not None else order.to_pay_amount
         order.cod_amount = None
         order.credit_amount = None
         order.prepaid_amount = None
     elif order.payment_method == "Credit":
-        order.credit_amount = max(0.0, base_credit) + float(order.total_freight)
+        order.credit_amount = data.credit_amount if data.credit_amount is not None else order.credit_amount
         order.cod_amount = None
         order.to_pay_amount = None
         order.prepaid_amount = None
     elif order.payment_method == "Prepaid":
-        order.prepaid_amount = float(order.total_freight)
+        order.prepaid_amount = data.prepaid_amount if data.prepaid_amount is not None else order.prepaid_amount
         order.cod_amount = None
         order.to_pay_amount = None
         order.credit_amount = None
