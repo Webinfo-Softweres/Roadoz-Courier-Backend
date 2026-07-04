@@ -20,6 +20,20 @@ class FranchiseOrdersDataSchema(BaseModel):
     franchise_orders_data: List[FranchiseOrderSchema]
     
 
+
+class FreightRateSchema(BaseModel):
+    id: str
+    service_type:str
+    zone: str
+    weight_up_to: float
+    base_rate: float
+
+
+class FreightRatesSchema(BaseModel):
+    Surface: List[FreightRateSchema] = []
+    Express: List[FreightRateSchema] = []
+
+
 class DashboardAnalyticsResponse(BaseModel):
     total_orders: int
     rto_orders: int
@@ -42,3 +56,4 @@ class DashboardAnalyticsResponse(BaseModel):
     
     franchise_orders_data: FranchiseOrdersDataSchema
     extra_counts: Optional[Dict[str, float]] = None  # E.g. {"total_users": 10, "total_franchises": 2, "total_wallet_balance": 1500.0}
+    datafreight_rates: Optional[FreightRatesSchema] = None

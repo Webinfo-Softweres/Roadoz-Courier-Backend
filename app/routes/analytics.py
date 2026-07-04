@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 
+from app.models.rate_master import RateMaster
 from app.core.database import get_db
 from app.dependencies.role_checker import get_current_user, require_permission
 from app.models.user import User
@@ -238,7 +239,18 @@ async def get_dashboard_analytics(
             "has_prev": pagef > 1
         },
         "franchise_orders_data": franchise_orders_data
-    }       
+    }
+    result = await db.execute(select(RateMaster))
+    rates = result.scalars().all()
+    datafreight_rates = {"Surface": [],"Express": []}
+    for rate in rates:
+        datafreight_rates[rate.service_type].append({
+            "id": rate.id,
+            "service_type":rate.service_type,
+            "zone": rate.zone,
+            "weight_up_to": float(rate.weight_up_to),
+            "base_rate": float(rate.base_rate)})
+              
     return DashboardAnalyticsResponse(
         total_orders=total_orders,
         rto_orders=rto_orders,
@@ -255,6 +267,7 @@ async def get_dashboard_analytics(
         remittance_pending_sum=remittance_pending_sum,
         remittance_remitted_sum=remittance_remitted_sum,
         franchise_orders_data=response  if response else None ,
-        extra_counts=extra_counts if extra_counts else None
+        extra_counts=extra_counts if extra_counts else None,
+        datafreight_rates=datafreight_rates if datafreight_rates else None
         
     )
