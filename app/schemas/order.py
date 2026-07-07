@@ -4,6 +4,8 @@ from datetime import datetime
 from enum import Enum
 from app.models.order import OrderStatus
 from datetime import date
+from app.schemas.franchise import FranchiseResponse
+from app.schemas.user import UserResponse
 # ── Enums ──────────────────────────────────────────────────────────────────
 
 
@@ -362,6 +364,8 @@ class OrderOut(BaseModel):
     status: str
     created_by: str
     franchise_id: Optional[str] = None
+    franchise: Optional[FranchiseResponse] = None
+    creator: Optional[UserResponse] = None
     created_at: datetime
     updated_at: datetime
 

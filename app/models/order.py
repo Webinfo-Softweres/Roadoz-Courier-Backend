@@ -159,6 +159,8 @@ class Order(Base):
     pickup_address = relationship("PickupAddress", lazy="selectin")
     consignee = relationship("Consignee", lazy="selectin")
     product_reviews  = relationship("ProductReview",back_populates="order", lazy="selectin")
+    creator = relationship("User", lazy="selectin")
+    franchise = relationship("Franchise", lazy="selectin")
     
     
     
