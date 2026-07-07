@@ -49,6 +49,8 @@ from app.schemas.order import (
     BulkOrderResponse,
     OrderUpdate,
 )
+from app.schemas.franchise import FranchiseResponse
+from app.schemas.user import UserResponse
 from typing import List, Optional,Tuple
 from sqlalchemy.orm import Session
 
@@ -293,6 +295,8 @@ def _build_order_out(order: Order) -> OrderOut:
         status=order.status,
         created_by=order.created_by,
         franchise_id=order.franchise_id,
+        franchise=FranchiseResponse.model_validate(order.franchise) if getattr(order, "franchise", None) else None,
+        creator=UserResponse.model_validate(order.creator) if getattr(order, "creator", None) else None,
         created_at=order.created_at,
         updated_at=order.updated_at,
     )
@@ -854,7 +858,7 @@ async def create_order(
     db=db,
     title="New Order",
     message=(f"Order {order.order_number} "f"created successfully"),type="order",order_id=order.id,)
-    await db.refresh(order, attribute_names=["items", "packages", "pickup_address", "consignee"])
+    await db.refresh(order, attribute_names=["items", "packages", "pickup_address", "consignee", "creator", "franchise"])
 
     return _build_order_out(order)
 
