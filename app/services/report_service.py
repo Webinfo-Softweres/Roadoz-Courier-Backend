@@ -185,9 +185,9 @@ async def daily_booking_report(
             "destination": order.consignee.city if order.consignee else None,
             "weight": _to_float(order.applicable_weight_kg),
             "amount": _to_float(order.shipping_charge),
-            "base_freight": _to_float(order.shipping_charge / 1.52 / 1.18) if order.shipping_charge else 0.0,
-            "fuel_surcharge": _to_float((order.shipping_charge / 1.18) - (order.shipping_charge / 1.52 / 1.18)) if order.shipping_charge else 0.0,
-            "gst_amount": _to_float(order.shipping_charge - (order.shipping_charge / 1.18)) if order.shipping_charge else 0.0,
+            "base_freight": _to_float(float(order.shipping_charge) / 1.52 / 1.18) if order.shipping_charge else 0.0,
+            "fuel_surcharge": _to_float((float(order.shipping_charge) / 1.18) - (float(order.shipping_charge) / 1.52 / 1.18)) if order.shipping_charge else 0.0,
+            "gst_amount": _to_float(float(order.shipping_charge) - (float(order.shipping_charge) / 1.18)) if order.shipping_charge else 0.0,
             "status": _status_value(order.status),
         }
         for order in orders
@@ -245,9 +245,9 @@ async def customer_wise_booking_report(
             "customer": row[0],
             "bookings": row[1],
             "revenue": _to_float(row[2]),
-            "base_freight": _to_float(row[2] / 1.52 / 1.18) if row[2] else 0.0,
-            "fuel_surcharge": _to_float((row[2] / 1.18) - (row[2] / 1.52 / 1.18)) if row[2] else 0.0,
-            "gst_amount": _to_float(row[2] - (row[2] / 1.18)) if row[2] else 0.0,
+            "base_freight": _to_float(float(row[2]) / 1.52 / 1.18) if row[2] else 0.0,
+            "fuel_surcharge": _to_float((float(row[2]) / 1.18) - (float(row[2]) / 1.52 / 1.18)) if row[2] else 0.0,
+            "gst_amount": _to_float(float(row[2]) - (float(row[2]) / 1.18)) if row[2] else 0.0,
             "pending_amount": _to_float(row[3]),
         }
         for row in rows
@@ -299,9 +299,9 @@ async def service_type_report(
             "service_type": row[0],
             "total_bookings": row[1],
             "revenue": _to_float(row[2]),
-            "base_freight": _to_float(row[2] / 1.52 / 1.18) if row[2] else 0.0,
-            "fuel_surcharge": _to_float((row[2] / 1.18) - (row[2] / 1.52 / 1.18)) if row[2] else 0.0,
-            "gst_amount": _to_float(row[2] - (row[2] / 1.18)) if row[2] else 0.0,
+            "base_freight": _to_float(float(row[2]) / 1.52 / 1.18) if row[2] else 0.0,
+            "fuel_surcharge": _to_float((float(row[2]) / 1.18) - (float(row[2]) / 1.52 / 1.18)) if row[2] else 0.0,
+            "gst_amount": _to_float(float(row[2]) - (float(row[2]) / 1.18)) if row[2] else 0.0,
         }
         for row in rows
     ]
