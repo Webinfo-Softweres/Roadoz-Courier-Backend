@@ -28,3 +28,4 @@ from app.models import user_admincommunication
 from app.models import user_role
 from app.models import warehouse
 from app.models import webconfiguration
+from app.models import month_end_closing

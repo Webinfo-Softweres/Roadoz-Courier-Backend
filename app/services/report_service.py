@@ -2109,3 +2109,52 @@ async def performance_dashboard_report(
         "items": items
     }
 
+
+async def month_end_closing_report(
+    db: AsyncSession, 
+    current_user: User, 
+    date_from: date | None, 
+    date_to: date | None, 
+    franchise_id: str | None
+) -> dict:
+    """
+    Month-End Closing Payment Report.
+    Fetches all the submitted payment records from franchises.
+    """
+    from app.models.month_end_closing import MonthEndClosing
+    from sqlalchemy import select
+    
+    query = select(MonthEndClosing)
+    
+    scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    if scoped_franchise_id:
+        query = query.where(MonthEndClosing.franchise_id == scoped_franchise_id)
+        
+    if date_from:
+        query = query.where(MonthEndClosing.created_at >= date_from)
+    if date_to:
+        query = query.where(MonthEndClosing.created_at <= date_to)
+        
+    result = await db.execute(query)
+    records = result.scalars().all()
+    
+    data = []
+    for r in records:
+        data.append({
+            "id": r.id,
+            "franchise_id": r.franchise_id,
+            "transaction_id": r.transaction_id,
+            "bank_name": r.bank_name,
+            "bank_owner_name": r.bank_owner_name,
+            "bank_account_number": r.bank_account_number,
+            "status": r.status,
+            "admin_notes": r.admin_notes,
+            "created_at": r.created_at.isoformat() if r.created_at else None
+        })
+        
+    return {
+        "report": "Month-End Closing Submissions",
+        "data": data,
+        "generated_at": datetime.now().isoformat(),
+        "requested_by": current_user.email
+    }
