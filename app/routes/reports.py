@@ -38,6 +38,7 @@ from app.services.report_service import (
     franchise_profitability_report,
     area_wise_business_report,
     performance_dashboard_report,
+    month_end_closing_report,
 )
 from app.services.export_service import export_to_csv, export_to_excel, export_to_pdf
 
@@ -202,6 +203,20 @@ async def user_activity_report_endpoint(
     _: User = Depends(require_permission("orders:view")),
 ):
     data = await user_activity_report(db, current_user, date_from, date_to, franchise_id)
+    return format_report_response(data, format)
+
+
+@router.get("/operations/month-end-closings")
+async def month_end_closings_report_endpoint(
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+    franchise_id: str | None = Query(None),
+    format: str = Query("json"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("month_end_closing:view")),
+):
+    data = await month_end_closing_report(db, current_user, date_from, date_to, franchise_id)
     return format_report_response(data, format)
 
 
