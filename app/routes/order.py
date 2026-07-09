@@ -5112,3 +5112,30 @@ async def update_manual_freight(
     await db.commit()
     await db.refresh(order)
     return order
+
+
+@router.get("/orders/filter-by-entity")
+async def get_orders_by_entity(
+    search_by: str = Query(..., description="'pickup_address' or 'consignee'"),
+    start_date: str | None = Query(None, description="Start date YYYY-MM-DD"),
+    end_date: str | None = Query(None, description="End date YYYY-MM-DD"),
+    name: str | None = Query(None, description="Search by name"),
+    pincode: str | None = Query(None, description="Filter by pincode"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("orders:view"))
+):
+    from app.services.order_service import search_orders_by_entity
+    return await search_orders_by_entity(
+        db=db,
+        current_user=current_user,
+        search_by=search_by,
+        start_date=start_date,
+        end_date=end_date,
+        name=name,
+        pincode=pincode,
+        page=page,
+        limit=limit,
+    )

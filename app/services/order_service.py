@@ -2336,3 +2336,74 @@ async def get_order_counts(
         "total_orders": total_orders or 0,
         "status_counts": status_counts
     }
+
+async def search_orders_by_entity(
+    db: AsyncSession,
+    current_user: User,
+    search_by: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    name: str | None = None,
+    pincode: str | None = None,
+    page: int = 1,
+    limit: int = 10,
+):
+    if search_by not in ["pickup_address", "consignee"]:
+        raise HTTPException(status_code=400, detail="search_by must be 'pickup_address' or 'consignee'")
+
+    is_global = not await _resolve_franchise_id(db, current_user)
+    filters = []
+    if not is_global:
+        franchise_id = await _resolve_franchise_id(db, current_user)
+        if franchise_id:
+            filters.append(Order.franchise_id == franchise_id)
+        else:
+            filters.append(Order.created_by == current_user.id)
+
+    if start_date:
+        from datetime import datetime, time
+        s_date = datetime.strptime(start_date, "%Y-%m-%d")
+        filters.append(Order.created_at >= s_date)
+    if end_date:
+        from datetime import datetime, time
+        e_date = datetime.combine(datetime.strptime(end_date, "%Y-%m-%d").date(), time.max)
+        filters.append(Order.created_at <= e_date)
+
+    if search_by == "pickup_address":
+        base_query = select(Order).join(PickupAddress, Order.pickup_address_id == PickupAddress.id)
+        count_query = select(func.count()).select_from(Order).join(PickupAddress, Order.pickup_address_id == PickupAddress.id)
+        if name:
+            filters.append(
+                or_(
+                    PickupAddress.nickname.ilike(f"%{name}%"),
+                    PickupAddress.contact_name.ilike(f"%{name}%"),
+                )
+            )
+        if pincode:
+            filters.append(PickupAddress.pincode == pincode)
+    else:
+        base_query = select(Order).join(Consignee, Order.consignee_id == Consignee.id)
+        count_query = select(func.count()).select_from(Order).join(Consignee, Order.consignee_id == Consignee.id)
+        if name:
+            filters.append(Consignee.name.ilike(f"%{name}%"))
+        if pincode:
+            filters.append(Consignee.pincode == pincode)
+
+    where_clause = and_(*filters) if filters else True
+    count_query = count_query.where(where_clause)
+    total = (await db.execute(count_query)).scalar_one()
+
+    offset = (page - 1) * limit
+    query = base_query.where(where_clause).order_by(Order.created_at.desc()).offset(offset).limit(limit)
+    result = await db.execute(query)
+    orders = result.scalars().all()
+
+    return {
+        "items": [_build_order_out(order) for order in orders],
+        "pagination": {
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pages": math.ceil(total / limit) if total > 0 else 0,
+        },
+    }
