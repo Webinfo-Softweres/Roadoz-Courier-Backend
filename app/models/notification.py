@@ -19,7 +19,7 @@ class Notification(Base):
     message = Column(String(1000),nullable=False)
     type = Column(String(50),default="order")
     is_read = Column(Boolean,default=False)
-    order_id = Column(String(36),ForeignKey("orders.id"),nullable=False)
+    order_id = Column(String(36),ForeignKey("orders.id"),nullable=True)
     created_at = Column(DateTime(timezone=True),default=lambda: datetime.now(IST))
     expires_at = Column(DateTime(timezone=True),default=lambda: datetime.now(IST) + timedelta(hours=5))
     
