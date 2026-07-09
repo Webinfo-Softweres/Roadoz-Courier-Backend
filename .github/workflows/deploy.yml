@@ -36,6 +36,7 @@ jobs:
             echo "Running database seeders..."
             python seed_warehouse_role.py
             python seed_franchise_invoice_perm.py
+            python seed_month_end_closing_perm.py
             sudo systemctl restart roadoz
             sudo systemctl is-active roadoz
 
@@ -68,5 +69,6 @@ jobs:
             echo "Running database seeders..."
             python seed_warehouse_role.py
             python seed_franchise_invoice_perm.py
+            python seed_month_end_closing_perm.py
             sudo systemctl restart roadoz
             sudo systemctl is-active roadoz
