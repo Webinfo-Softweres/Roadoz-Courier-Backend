@@ -20,13 +20,17 @@ router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
 async def _get_franchise_for_user(db: AsyncSession, user_id: str) -> str | None:
     result = await db.execute(select(Franchise).where(Franchise.user_id == user_id))
-    franchise = result.scalar_one_or_none()
+    franchise = result.scalars().first()
     return franchise.id if franchise else None
 
 async def _resolve_franchise_id(db: AsyncSession, user: User) -> str | None:
     if user.franchise_id:
         return user.franchise_id
     return await _get_franchise_for_user(db, user.id)
+
+async def _resolve_warehouse_id(db: AsyncSession, user: User) -> str | None:
+    from app.services.order_service import _resolve_warehouse_id as _warehouse_resolve
+    return await _warehouse_resolve(db, user)
 
 @router.get("/dashboard", response_model=DashboardAnalyticsResponse)
 async def get_dashboard_analytics(
@@ -39,20 +43,24 @@ async def get_dashboard_analytics(
     _: User = Depends(require_permission("orders:view")) # Using orders:view as generic dashboard access
 ):
     franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+    is_global = not franchise_id and not warehouse_id
     
     # Convert dates to datetime bounds for datetime fields
     start_dt = datetime.combine(date_from, datetime.min.time()) if date_from else None
     end_dt = datetime.combine(date_to, datetime.max.time()) if date_to else None
     
-    # 1. Base conditions for Orders and Wallet Transactions
+    # 1. Base conditions for Orders
     order_conditions = []
     if franchise_id:
         order_conditions.append(Order.franchise_id == franchise_id)
+    elif warehouse_id:
+        order_conditions.append(Order.warehouse_id == warehouse_id)
+    # if is_global: no filter — show all
     if start_dt:
         order_conditions.append(Order.created_at >= start_dt)
     if end_dt:
         order_conditions.append(Order.created_at <= end_dt)
-        
 
     # 2. Total Orders
     total_orders_query = select(func.count(Order.id)).where(*order_conditions)
@@ -106,6 +114,8 @@ async def get_dashboard_analytics(
     expense_conditions = []
     if franchise_id:
         expense_conditions.append(Expense.franchise_id == franchise_id)
+    elif warehouse_id:
+        expense_conditions.append(Expense.warehouse_id == warehouse_id)
     if date_from:
         expense_conditions.append(Expense.expense_date >= date_from)
     if date_to:
@@ -114,6 +124,8 @@ async def get_dashboard_analytics(
     voucher_conditions = []
     if franchise_id:
         voucher_conditions.append(CashVoucher.franchise_id == franchise_id)
+    elif warehouse_id:
+        voucher_conditions.append(CashVoucher.warehouse_id == warehouse_id)
     if date_from:
         voucher_conditions.append(CashVoucher.voucher_date >= date_from)
     if date_to:
@@ -122,6 +134,8 @@ async def get_dashboard_analytics(
     attendance_conditions = []
     if franchise_id:
         attendance_conditions.append(StaffAttendance.franchise_id == franchise_id)
+    elif warehouse_id:
+        attendance_conditions.append(StaffAttendance.warehouse_id == warehouse_id)
     if date_from:
         attendance_conditions.append(StaffAttendance.attendance_date >= date_from)
     if date_to:
@@ -130,6 +144,8 @@ async def get_dashboard_analytics(
     remittance_conditions = []
     if franchise_id:
         remittance_conditions.append(Remittance.franchise_id == franchise_id)
+    elif warehouse_id:
+        remittance_conditions.append(Remittance.warehouse_id == warehouse_id)
     if start_dt:
         remittance_conditions.append(Remittance.created_at >= start_dt)
     if end_dt:
@@ -175,12 +191,12 @@ async def get_dashboard_analytics(
 
     # 11. Extra Counts (Admin only counts)
     extra_counts = {}
-    if not franchise_id:
+    if is_global:
         total_users = (await db.execute(select(func.count(User.id)))).scalar_one() or 0
         total_franchises = (await db.execute(select(func.count(Franchise.id)))).scalar_one() or 0
         extra_counts["total_users"] = float(total_users)
         extra_counts["total_franchises"] = float(total_franchises)
-        
+
         
     # franchise order count    
     offset = (pagef - 1) * limitf   

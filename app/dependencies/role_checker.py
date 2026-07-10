@@ -14,11 +14,12 @@ from app.models.franchise import Franchise
 
 
 async def is_global_user(db: AsyncSession, current_user: User) -> bool:
-    if current_user.franchise_id:
+    from app.services.order_service import _resolve_franchise_id, _resolve_warehouse_id
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    if franchise_id is not None:
         return False
-    result = await db.execute(select(Franchise).where(Franchise.user_id == current_user.id))
-    franchise = result.scalar_one_or_none()
-    return franchise is None
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+    return warehouse_id is None
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),

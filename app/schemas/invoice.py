@@ -55,6 +55,7 @@ class InvoiceOut(BaseModel):
     id: str
     invoice_number: str
     franchise_id: Optional[str]
+    warehouse_id: Optional[str] = None
     description: str
     period_start: date
     period_end: date

@@ -40,8 +40,12 @@ async def _resolve_franchise_id(db: AsyncSession, user: User) -> str | None:
     if user.franchise_id:
         return user.franchise_id
     result = await db.execute(select(Franchise).where(Franchise.user_id == user.id))
-    franchise = result.scalar_one_or_none()
+    franchise = result.scalars().first()
     return franchise.id if franchise else None
+
+async def _resolve_warehouse_id(db: AsyncSession, user: User) -> str | None:
+    from app.services.order_service import _resolve_warehouse_id as _wh
+    return await _wh(db, user)
 
 
 # ── Remittance Summary ───────────────────────────────────────────────────
@@ -52,48 +56,55 @@ async def get_remittance_summary(
 ) -> RemittanceSummaryOut:
     caller_role = await _get_caller_role_name(db, current_user.id)
 
-    is_global = not await _resolve_franchise_id(db, current_user)
+    is_global = not await _resolve_franchise_id(db, current_user) and not await _resolve_warehouse_id(db, current_user)
     if is_global and franchise_id:
         fid = franchise_id
+        wid = None
+    elif is_global:
+        fid = None
+        wid = None
     else:
         fid = await _resolve_franchise_id(db, current_user)
-        if not fid:
+        wid = await _resolve_warehouse_id(db, current_user)
+        if not fid and not wid:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No franchise linked to this user",
+                detail="No franchise or warehouse linked to this user",
             )
 
     # Total remitted
+    remitted_filter = [Remittance.status == "remitted"]
+    if fid:
+        remitted_filter.append(Remittance.franchise_id == fid)
+    elif wid:
+        remitted_filter.append(Remittance.warehouse_id == wid)
     remitted_result = await db.execute(
         select(
             func.coalesce(func.sum(Remittance.total_amount), 0),
             func.coalesce(func.sum(Remittance.orders_count), 0),
         )
-        .where(
-            and_(
-                Remittance.franchise_id == fid,
-                Remittance.status == "remitted",
-            )
-        )
+        .where(and_(*remitted_filter))
     )
     remitted_row = remitted_result.one()
     remitted_amount = float(remitted_row[0])
     remitted_orders = int(remitted_row[1])
 
     # Due: delivered COD orders NOT yet linked to any remittance
+    due_filter = [
+        Order.payment_method == "COD",
+        Order.status == "delivered",
+        ~Order.id.in_(select(RemittanceOrder.order_id)),
+    ]
+    if fid:
+        due_filter.append(Order.franchise_id == fid)
+    elif wid:
+        due_filter.append(Order.warehouse_id == wid)
     due_result = await db.execute(
         select(
             func.coalesce(func.sum(Order.cod_amount), 0),
             func.count(Order.id),
         )
-        .where(
-            and_(
-                Order.franchise_id == fid,
-                Order.payment_method == "COD",
-                Order.status == "delivered",
-                ~Order.id.in_(select(RemittanceOrder.order_id)),
-            )
-        )
+        .where(and_(*due_filter))
     )
     due_row = due_result.one()
     due_amount = float(due_row[0])
@@ -122,18 +133,22 @@ async def list_remittances(
 
     filters = []
 
-    is_global = not await _resolve_franchise_id(db, current_user)
+    is_global = not await _resolve_franchise_id(db, current_user) and not await _resolve_warehouse_id(db, current_user)
     if is_global:
         if franchise_id:
             filters.append(Remittance.franchise_id == franchise_id)
     else:
         fid = await _resolve_franchise_id(db, current_user)
-        if not fid:
+        wid = await _resolve_warehouse_id(db, current_user)
+        if fid:
+            filters.append(Remittance.franchise_id == fid)
+        elif wid:
+            filters.append(Remittance.warehouse_id == wid)
+        else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No franchise linked to this user",
+                detail="No franchise or warehouse linked to this user",
             )
-        filters.append(Remittance.franchise_id == fid)
 
     if status_filter:
         filters.append(Remittance.status == status_filter)
@@ -287,10 +302,13 @@ async def get_remittance(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Remittance not found")
 
     # Access control
-    is_global = not await _resolve_franchise_id(db, current_user)
+    is_global = not await _resolve_franchise_id(db, current_user) and not await _resolve_warehouse_id(db, current_user)
     if not is_global:
         fid = await _resolve_franchise_id(db, current_user)
-        if remittance.franchise_id != fid:
+        wid = await _resolve_warehouse_id(db, current_user)
+        if fid and remittance.franchise_id != fid:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        elif wid and remittance.warehouse_id != wid:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     return RemittanceOut.model_validate(remittance)

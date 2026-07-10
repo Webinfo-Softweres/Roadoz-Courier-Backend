@@ -42,6 +42,7 @@ from app.models.consigeeauth import AuthUser
 from app.utils.webconfig import check_maintenance_mode
 from app.services.order_service import (
     _resolve_franchise_id,
+    _resolve_warehouse_id,
     search_pickup_addresses,
     create_pickup_address,
     update_pickup_address,
@@ -2604,7 +2605,7 @@ async def get_today_status_orders(
     # ROLE FILTER
     # =========================================================
 
-    is_global = not await _resolve_franchise_id(db, current_user)
+    is_global = not await _resolve_franchise_id(db, current_user) and not await _resolve_warehouse_id(db, current_user)
     if not is_global:
         filters.append(
             Order.created_by == current_user.id
@@ -3303,7 +3304,7 @@ async def get_date_wise_all_status(
     role_name = role_result.scalar_one_or_none()
     today = payload.date
     order_filters = [func.date(Order.updated_at) == today]
-    is_global = not await _resolve_franchise_id(db, current_user)
+    is_global = not await _resolve_franchise_id(db, current_user) and not await _resolve_warehouse_id(db, current_user)
     if not is_global:
         order_filters.append(Order.created_by == current_user.id)
     order_result = await db.execute(select(Order.status).where(*order_filters))
@@ -3630,7 +3631,7 @@ async def get_date_wise_status_address(
     current_user: User = Depends(get_current_user),
     _: User = Depends(require_permission("orders:view")),
 ):
-    is_global = not await _resolve_franchise_id(db, current_user)
+    is_global = not await _resolve_franchise_id(db, current_user) and not await _resolve_warehouse_id(db, current_user)
     
     selected_date = payload.date
     selected_status = payload.status.strip()
@@ -4075,7 +4076,7 @@ async def get_bulk_order_details(
     if not bulk_order:
         raise HTTPException(status_code=404, detail="Bulk order not found")
     
-    is_global = not await _resolve_franchise_id(db, current_user)
+    is_global = not await _resolve_franchise_id(db, current_user) and not await _resolve_warehouse_id(db, current_user)
     if bulk_order.created_by != current_user.id and not is_global:
         raise HTTPException(status_code=403, detail="Not authorized to view this bulk order")
     

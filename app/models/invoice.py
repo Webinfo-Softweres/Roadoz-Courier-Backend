@@ -20,6 +20,9 @@ class Invoice(Base):
     franchise_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("franchises.id", ondelete="CASCADE"), nullable=True, index=True
     )
+    warehouse_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("warehouse_addresses.id", ondelete="CASCADE"), nullable=True, index=True
+    )
 
     description: Mapped[str] = mapped_column(String(500), nullable=False)
 
