@@ -193,15 +193,35 @@ async def _get_caller_role_name(db: AsyncSession, user_id: str) -> str | None:
 
 async def _get_franchise_for_user(db: AsyncSession, user_id: str) -> Franchise | None:
     result = await db.execute(select(Franchise).where(Franchise.user_id == user_id))
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 
 async def _resolve_franchise_id(db: AsyncSession, user: User) -> str | None:
     """Return franchise_id for the current user (owner or employee)."""
+    caller_role = await _get_caller_role_name(db, user.id)
+    if caller_role == "super_admin":
+        return None
     if user.franchise_id:
         return user.franchise_id
     franchise = await _get_franchise_for_user(db, user.id)
     return franchise.id if franchise else None
+
+
+async def _get_warehouse_for_user(db: AsyncSession, user_id: str) -> WareHouseAddress | None:
+    """Return the WareHouseAddress row owned by this user (warehouse owner login)."""
+    result = await db.execute(select(WareHouseAddress).where(WareHouseAddress.user_id == user_id))
+    return result.scalars().first()
+
+
+async def _resolve_warehouse_id(db: AsyncSession, user: User) -> str | None:
+    """Return warehouse id for the current user if they are a warehouse user, else None."""
+    caller_role = await _get_caller_role_name(db, user.id)
+    if caller_role == "super_admin":
+        return None
+    if getattr(user, 'warehouse_id', None):
+        return user.warehouse_id
+    warehouse = await _get_warehouse_for_user(db, user.id)
+    return warehouse.id if warehouse else None
 
 
 
@@ -311,7 +331,7 @@ async def search_pickup_addresses(
     page: int = 1,
     limit: int = 10,) -> PickupAddressListResponse:
     franchise_id = await _resolve_franchise_id(db, current_user)
-    is_global = not current_user.franchise_id and not await _get_franchise_for_user(db, current_user.id)
+    is_global = not current_user.franchise_id and not await _get_franchise_for_user(db, current_user.id) and not await _get_warehouse_for_user(db, current_user.id)
     
     query = select(PickupAddress)
     count_query = select(func.count()).select_from(PickupAddress)
@@ -327,9 +347,6 @@ async def search_pickup_addresses(
         search_filter = or_(
             PickupAddress.nickname.ilike(f"%{search}%"),
             PickupAddress.contact_name.ilike(f"%{search}%"),
-            PickupAddress.address_line_1.ilike(f"%{search}%"),
-            PickupAddress.city.ilike(f"%{search}%"),
-            PickupAddress.pincode.ilike(f"%{search}%"),
         )
         query = query.where(search_filter)
         count_query = count_query.where(search_filter)
@@ -518,7 +535,7 @@ async def search_consignees(
     limit: int = 25,
 ) -> ConsigneeListResponse:
     franchise_id = await _resolve_franchise_id(db, current_user)
-    is_global = not current_user.franchise_id and not await _get_franchise_for_user(db, current_user.id)
+    is_global = not current_user.franchise_id and not await _get_franchise_for_user(db, current_user.id) and not await _get_warehouse_for_user(db, current_user.id)
 
     query = select(Consignee)
     count_query = select(func.count()).select_from(Consignee)
@@ -697,6 +714,7 @@ async def create_order(
     #     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Warehouse not found")
 
     franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
     order_number = await _generate_order_number(db)
 
     # Build order
@@ -723,6 +741,7 @@ async def create_order(
         previous_status=OrderStatus.PROCESSING,
         created_by=current_user.id,
         franchise_id=franchise_id,
+        warehouse_id=warehouse_id,
     )
     
     
@@ -874,6 +893,7 @@ async def process_bulk_excel_upload(
 ) -> BulkOrderResponse:
 
     franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
     bulk_order = BulkOrder(
         id=str(uuid.uuid4()),
         file_name=file_name,
@@ -881,6 +901,7 @@ async def process_bulk_excel_upload(
         pickup_address_id=pickup_address_id,
         created_by=current_user.id,
         franchise_id=franchise_id,
+        warehouse_id=warehouse_id,
         status="Processing"
     )
     db.add(bulk_order)
@@ -1061,17 +1082,21 @@ async def list_bulk_orders(
     file_name: str | None = None,
 ) -> BulkOrderListResponse:
     franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+    is_global = not franchise_id and not warehouse_id
     query = select(BulkOrder)
     count_query = select(func.count()).select_from(BulkOrder)
-    if franchise_id:
-        query = query.where(BulkOrder.franchise_id == franchise_id)
-        count_query = count_query.where(BulkOrder.franchise_id == franchise_id)
-    else:
-        is_global = not await _resolve_franchise_id(db, current_user)
-        if not is_global:
+
+    if not is_global:
+        if franchise_id:
+            query = query.where(BulkOrder.franchise_id == franchise_id)
+            count_query = count_query.where(BulkOrder.franchise_id == franchise_id)
+        elif warehouse_id:
+            query = query.where(BulkOrder.warehouse_id == warehouse_id)
+            count_query = count_query.where(BulkOrder.warehouse_id == warehouse_id)
+        else:
             query = query.where(BulkOrder.created_by == current_user.id)
             count_query = count_query.where(BulkOrder.created_by == current_user.id)
-
     
     if start_date:
         start_datetime = datetime.combine(start_date, time.min)
@@ -1269,6 +1294,7 @@ async def duplicate_order(
     new_order_number = await _generate_order_number(db)
 
     franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
 
     # Create new order - REMOVED the non-existent field
     new_order = Order(
@@ -1294,6 +1320,7 @@ async def duplicate_order(
         status=OrderStatus.PROCESSING.value,  # Use .value if OrderStatus is Enum
         created_by=current_user.id,
         franchise_id=franchise_id,
+        warehouse_id=warehouse_id,
     )
 
     new_order.barcode = generate_barcode_base64(new_order_number)
@@ -1465,17 +1492,19 @@ async def list_orders(
     if bulk_order_id:
         filters.append(Order.bulk_order_id == bulk_order_id)
 
-    is_global = not await _resolve_franchise_id(db, current_user)
+    # ── Role-based scoping ─────────────────────────────────────────────────
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+    is_global = not franchise_id and not warehouse_id
+
     if not is_global:
-
-        franchise_id = await _resolve_franchise_id(
-            db,
-            current_user
-        )
-
         if franchise_id:
             filters.append(
                 Order.franchise_id == franchise_id
+            )
+        elif warehouse_id:
+            filters.append(
+                Order.warehouse_id == warehouse_id
             )
         else:
             filters.append(
@@ -1653,7 +1682,7 @@ async def get_order(
     if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
 
-    is_global = not await _resolve_franchise_id(db, current_user)
+    is_global = not await _resolve_franchise_id(db, current_user) and not await _resolve_warehouse_id(db, current_user)
     if not is_global:
         franchise_id = await _resolve_franchise_id(db, current_user)
         if franchise_id:
@@ -2281,7 +2310,7 @@ async def delete_order(
     if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="Order not found")
 
-    is_global = not await _resolve_franchise_id(db, current_user)
+    is_global = not await _resolve_franchise_id(db, current_user) and not await _resolve_warehouse_id(db, current_user)
     if not is_global:
         franchise_id = await _resolve_franchise_id(db, current_user)
         if franchise_id:
@@ -2316,7 +2345,7 @@ async def get_order_counts(
     current_user: User = Depends(get_current_user),):
     total_query = select(func.count(Order.id))
     status_query = (select(func.lower(Order.status),func.count(Order.id)).group_by(func.lower(Order.status)))
-    is_global = not await _resolve_franchise_id(db, current_user)
+    is_global = not await _resolve_franchise_id(db, current_user) and not await _resolve_warehouse_id(db, current_user)
     if not is_global:
         franchise_id = await _resolve_franchise_id(db,current_user)
         if franchise_id:
@@ -2351,7 +2380,7 @@ async def search_orders_by_entity(
     if search_by not in ["pickup_address", "consignee"]:
         raise HTTPException(status_code=400, detail="search_by must be 'pickup_address' or 'consignee'")
 
-    is_global = not await _resolve_franchise_id(db, current_user)
+    is_global = not await _resolve_franchise_id(db, current_user) and not await _resolve_warehouse_id(db, current_user)
     filters = []
     if not is_global:
         franchise_id = await _resolve_franchise_id(db, current_user)

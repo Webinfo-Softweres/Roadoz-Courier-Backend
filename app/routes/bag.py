@@ -6,7 +6,7 @@ from app.core.database import get_db
 from app.dependencies.role_checker import get_current_user, require_permission
 from app.models.user import User
 from app.models.order import Bag, BagOrder
-from app.services.order_service import _resolve_franchise_id
+from app.services.order_service import _resolve_franchise_id, _resolve_warehouse_id
 
 router = APIRouter(prefix="/bags", tags=["Bags"])
 
@@ -18,7 +18,7 @@ async def delete_bag(
     _: User = Depends(require_permission("bags:delete"))
 ):
     franchise_id = await _resolve_franchise_id(db, current_user)
-    is_global = not franchise_id
+    is_global = not franchise_id and not await _resolve_warehouse_id(db, current_user)
 
     result = await db.execute(select(Bag).where(Bag.id == bag_id))
     bag = result.scalar_one_or_none()

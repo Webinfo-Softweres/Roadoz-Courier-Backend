@@ -111,6 +111,7 @@ async def create_user(
     caller_role = await _get_caller_role_name(db, current_user.id)
 
     franchise_id = None
+    warehouse_id = None
     employee_code = None
 
     if caller_role == "franchise":
@@ -127,6 +128,15 @@ async def create_user(
             )
         franchise_id = franchise.id
         employee_code = await _generate_employee_code(db, franchise)
+    elif caller_role == "warehouse":
+        from app.services.order_service import _get_warehouse_for_user
+        warehouse = await _get_warehouse_for_user(db, current_user.id)
+        if not warehouse:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No warehouse linked to your account",
+            )
+        warehouse_id = warehouse.id
 
     user = User(
         id=str(uuid.uuid4()),
@@ -138,6 +148,7 @@ async def create_user(
         address=data.address,
         location=data.location,
         franchise_id=franchise_id,
+        warehouse_id=warehouse_id,
         employee_code=employee_code,
         is_active=bool(data.is_active),
     )
@@ -177,55 +188,23 @@ async def list_users(
 
     base_filter = []
 
-    is_global = not current_user.franchise_id and not await _get_franchise_for_owner(db, current_user.id)
+    from app.services.order_service import _resolve_franchise_id, _resolve_warehouse_id
+    own_franchise_id = await _resolve_franchise_id(db, current_user)
+    own_warehouse_id = await _resolve_warehouse_id(db, current_user)
+    is_global = not own_franchise_id and not own_warehouse_id
 
     if is_global:
-
         if franchise_id is not None:
-
             if franchise_id == "none":
-                base_filter.append(
-                    User.franchise_id.is_(None)
-                )
-
+                base_filter.append(User.franchise_id.is_(None))
             else:
-                base_filter.append(
-                    User.franchise_id == franchise_id
-                )
-
-    elif caller_role == "franchise":
-
-        franchise = await _get_franchise_for_owner(
-            db,
-            current_user.id
-        )
-
-        if not franchise:
-            return UserListResponse(
-                items=[],
-                total=0,
-                page=page,
-                limit=limit,
-                pages=0,
-            )
-
-        base_filter.append(
-            User.franchise_id == franchise.id
-        )
-
+                base_filter.append(User.franchise_id == franchise_id)
+    elif own_franchise_id:
+        base_filter.append(User.franchise_id == own_franchise_id)
+    elif own_warehouse_id:
+        base_filter.append(User.warehouse_id == own_warehouse_id)
     else:
-
-        if current_user.franchise_id:
-
-            base_filter.append(
-                User.franchise_id == current_user.franchise_id
-            )
-
-        else:
-
-            base_filter.append(
-                User.id == current_user.id
-            )
+        base_filter.append(User.id == current_user.id)
 
     query = (
         select(User)
@@ -565,20 +544,20 @@ async def create_role(db: AsyncSession, data: RoleCreateRequest, current_user: U
     if result.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Role already exists")
 
-    is_global = not current_user.franchise_id and not await _get_franchise_for_owner(db, current_user.id)
-    caller_role = await _get_caller_role_name(db, current_user.id)
+    from app.services.order_service import _resolve_franchise_id, _resolve_warehouse_id
+    own_franchise_id = await _resolve_franchise_id(db, current_user)
+    own_warehouse_id = await _resolve_warehouse_id(db, current_user)
+    is_global = not own_franchise_id and not own_warehouse_id
 
     franchise_id = None
-    if caller_role == "franchise":
-        franchise = await _get_franchise_for_owner(db, current_user.id)
-        if not franchise:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No franchise linked")
-        franchise_id = franchise.id
-    elif not is_global:
-        if current_user.franchise_id:
-            franchise_id = current_user.franchise_id
+    warehouse_id = None
 
-    role = Role(id=str(uuid.uuid4()), name=data.name, franchise_id=franchise_id)
+    if own_franchise_id:
+        franchise_id = own_franchise_id
+    elif own_warehouse_id:
+        warehouse_id = own_warehouse_id
+
+    role = Role(id=str(uuid.uuid4()), name=data.name, franchise_id=franchise_id, warehouse_id=warehouse_id)
     db.add(role)
     await db.flush()
 
@@ -601,8 +580,10 @@ async def list_roles(
 ) -> RoleListResponse:
     base_filter = [Role.name != "super_admin"]
 
-    caller_role = await _get_caller_role_name(db, current_user.id)
-    is_global = not current_user.franchise_id and not await _get_franchise_for_owner(db, current_user.id)
+    from app.services.order_service import _resolve_franchise_id, _resolve_warehouse_id
+    own_franchise_id = await _resolve_franchise_id(db, current_user)
+    own_warehouse_id = await _resolve_warehouse_id(db, current_user)
+    is_global = not own_franchise_id and not own_warehouse_id
 
     if is_global:
         if franchise_id is not None:
@@ -611,15 +592,15 @@ async def list_roles(
             else:
                 base_filter.append(Role.franchise_id == franchise_id)
         else:
+            # Admin sees global roles only (franchise_id IS NULL AND warehouse_id IS NULL)
             base_filter.append(Role.franchise_id.is_(None))
-    elif caller_role == "franchise":
-        franchise = await _get_franchise_for_owner(db, current_user.id)
-        if not franchise:
-            return RoleListResponse(items=[], total=0, page=page, limit=limit, pages=0)
-        base_filter.append(Role.franchise_id == franchise.id)
+            base_filter.append(Role.warehouse_id.is_(None))
+    elif own_franchise_id:
+        base_filter.append(Role.franchise_id == own_franchise_id)
+    elif own_warehouse_id:
+        base_filter.append(Role.warehouse_id == own_warehouse_id)
     else:
-        if current_user.franchise_id:
-            base_filter.append(Role.franchise_id == current_user.franchise_id)
+        base_filter.append(Role.id.is_(None))  # no access fallback
 
     query = select(Role)
     count_query = select(func.count()).select_from(Role)

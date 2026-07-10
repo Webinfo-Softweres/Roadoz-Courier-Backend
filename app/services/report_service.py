@@ -123,9 +123,15 @@ async def _resolve_franchise_id(db: AsyncSession, user: User) -> str | None:
     return franchise.id if franchise else None
 
 
+async def _resolve_warehouse_id(db: AsyncSession, user: User) -> str | None:
+    from app.services.order_service import _resolve_warehouse_id as _wh
+    return await _wh(db, user)
+
+
 async def _scope_franchise_id(db: AsyncSession, current_user: User, franchise_id: str | None = None) -> str | None:
     resolved = await _resolve_franchise_id(db, current_user)
-    is_global = not resolved
+    wh_resolved = await _resolve_warehouse_id(db, current_user)
+    is_global = not resolved and not wh_resolved
     if is_global:
         return franchise_id
     if franchise_id and resolved and franchise_id != resolved:
@@ -133,16 +139,23 @@ async def _scope_franchise_id(db: AsyncSession, current_user: User, franchise_id
     return resolved
 
 
-def _order_filters(scoped_franchise_id: str | None, date_from: date | None, date_to: date | None) -> list[Any]:
+def _order_filters(scoped_franchise_id: str | None, date_from: date | None, date_to: date | None, scoped_warehouse_id: str | None = None) -> list[Any]:
     start, end = _date_range(date_from, date_to)
     filters = []
     if scoped_franchise_id:
         filters.append(Order.franchise_id == scoped_franchise_id)
+    elif scoped_warehouse_id:
+        filters.append(Order.warehouse_id == scoped_warehouse_id)
     if start:
         filters.append(Order.created_at >= start)
     if end:
         filters.append(Order.created_at <= end)
     return filters
+
+
+async def _scope_warehouse_id(db: AsyncSession, current_user: User) -> str | None:
+    """Return warehouse_id scoped to current user (warehouse users only see their own)."""
+    return await _resolve_warehouse_id(db, current_user)
 
 
 async def daily_booking_report(
@@ -154,6 +167,7 @@ async def daily_booking_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     if date_from or date_to:
         start_date = date_from
         end_date = date_to
@@ -164,12 +178,14 @@ async def daily_booking_report(
     additional_filters = []
     if scoped_franchise_id:
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
+    elif scoped_warehouse_id:
+        additional_filters.append(Order.warehouse_id == scoped_warehouse_id)
 
     resolved_from, resolved_to, opening_amount = await _resolve_dates_and_opening(
         db, Order, Order.created_at, start_date, end_date, Order.shipping_charge, additional_filters
     )
 
-    filters = _order_filters(scoped_franchise_id, resolved_from, resolved_to)
+    filters = _order_filters(scoped_franchise_id, resolved_from, resolved_to, scoped_warehouse_id)
     result = await db.execute(
         select(Order)
         .where(and_(*filters))
@@ -216,15 +232,18 @@ async def customer_wise_booking_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     additional_filters = []
     if scoped_franchise_id:
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
+    elif scoped_warehouse_id:
+        additional_filters.append(Order.warehouse_id == scoped_warehouse_id)
 
     resolved_from, resolved_to, opening_vals = await _resolve_dates_and_opening(
         db, Order, Order.created_at, date_from, date_to, [Order.shipping_charge, Order.cod_amount], additional_filters
     )
 
-    filters = _order_filters(scoped_franchise_id, resolved_from, resolved_to)
+    filters = _order_filters(scoped_franchise_id, resolved_from, resolved_to, scoped_warehouse_id)
     rows = (
         await db.execute(
             select(
@@ -277,15 +296,18 @@ async def service_type_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     additional_filters = []
     if scoped_franchise_id:
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
+    elif scoped_warehouse_id:
+        additional_filters.append(Order.warehouse_id == scoped_warehouse_id)
 
     resolved_from, resolved_to, opening_revenue = await _resolve_dates_and_opening(
         db, Order, Order.created_at, date_from, date_to, Order.shipping_charge, additional_filters
     )
 
-    filters = _order_filters(scoped_franchise_id, resolved_from, resolved_to)
+    filters = _order_filters(scoped_franchise_id, resolved_from, resolved_to, scoped_warehouse_id)
     rows = (
         await db.execute(
             select(Order.order_type, func.count(Order.id), func.coalesce(func.sum(Order.shipping_charge), 0))
@@ -327,10 +349,11 @@ async def delivery_status_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     resolved_from, resolved_to, _ = await _resolve_dates_and_opening(
         db, Order, Order.created_at, date_from, date_to, None, []
     )
-    filters = _order_filters(scoped_franchise_id, resolved_from, resolved_to)
+    filters = _order_filters(scoped_franchise_id, resolved_from, resolved_to, scoped_warehouse_id)
     result = await db.execute(select(Order).where(and_(*filters)).order_by(Order.updated_at.desc()))
     orders = result.scalars().all()
     return {
@@ -358,6 +381,7 @@ async def pending_delivery_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     resolved_from, resolved_to, _ = await _resolve_dates_and_opening(
         db, Order, Order.created_at, date_from, date_to, None, []
     )
@@ -396,6 +420,7 @@ async def cod_pending_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     additional_filters = [
         Order.payment_method == "COD",
         Order.cod_amount.is_not(None),
@@ -457,9 +482,12 @@ async def gst_sales_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     additional_filters = []
     if scoped_franchise_id:
         additional_filters.append(Invoice.franchise_id == scoped_franchise_id)
+    elif scoped_warehouse_id:
+        additional_filters.append(Invoice.warehouse_id == scoped_warehouse_id)
 
     resolved_from, resolved_to, opening_vals = await _resolve_dates_and_opening(
         db, Invoice, Invoice.created_at, date_from, date_to, [Invoice.subtotal, Invoice.tax_amount, Invoice.total_amount], additional_filters
@@ -468,6 +496,8 @@ async def gst_sales_report(
     filters = []
     if scoped_franchise_id:
         filters.append(Invoice.franchise_id == scoped_franchise_id)
+    elif scoped_warehouse_id:
+        filters.append(Invoice.warehouse_id == scoped_warehouse_id)
     filters.append(Invoice.created_at >= datetime.combine(resolved_from, datetime.min.time()))
     filters.append(Invoice.created_at <= datetime.combine(resolved_to, datetime.max.time()))
 
@@ -518,15 +548,18 @@ async def franchise_settlement_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     additional_filters = []
     if scoped_franchise_id:
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
+    elif scoped_warehouse_id:
+        additional_filters.append(Order.warehouse_id == scoped_warehouse_id)
 
     resolved_from, resolved_to, opening_revenue = await _resolve_dates_and_opening(
         db, Order, Order.created_at, date_from, date_to, Order.shipping_charge, additional_filters
     )
 
-    filters = _order_filters(scoped_franchise_id, resolved_from, resolved_to)
+    filters = _order_filters(scoped_franchise_id, resolved_from, resolved_to, scoped_warehouse_id)
     rows = (
         await db.execute(
             select(
@@ -590,6 +623,7 @@ async def franchise_settlement_report(
 
 async def monthly_revenue_analysis(db: AsyncSession, current_user: User, year: int | None = None, franchise_id: str | None = None) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     target_year = year or date.today().year
 
     # Opening balance prior to the target year
@@ -597,6 +631,8 @@ async def monthly_revenue_analysis(db: AsyncSession, current_user: User, year: i
     additional_filters = []
     if scoped_franchise_id:
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
+    elif scoped_warehouse_id:
+        additional_filters.append(Order.warehouse_id == scoped_warehouse_id)
 
     opening_revenue = (await db.execute(
         select(func.coalesce(func.sum(Order.shipping_charge), 0))
@@ -676,10 +712,11 @@ async def delivery_efficiency_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     resolved_from, resolved_to, _ = await _resolve_dates_and_opening(
         db, Order, Order.created_at, date_from, date_to, None, []
     )
-    filters = _order_filters(scoped_franchise_id, resolved_from, resolved_to)
+    filters = _order_filters(scoped_franchise_id, resolved_from, resolved_to, scoped_warehouse_id)
     rows = (
         await db.execute(
             select(Franchise.id, Franchise.name, Order.status, func.count(Order.id))
@@ -729,6 +766,7 @@ async def day_close_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     target_date = report_date or date.today()
     
     opening_vouchers = (await db.execute(
@@ -818,6 +856,7 @@ async def branch_activity_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     additional_filters = [CashVoucher.type == "receipt"]
     if scoped_franchise_id:
         additional_filters.append(CashVoucher.franchise_id == scoped_franchise_id)
@@ -905,6 +944,7 @@ async def user_activity_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     resolved_from, resolved_to, _ = await _resolve_dates_and_opening(
         db, Order, Order.created_at, date_from, date_to, None, []
     )
@@ -965,6 +1005,7 @@ async def returned_shipment_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     resolved_from, resolved_to, _ = await _resolve_dates_and_opening(
         db, Order, Order.created_at, date_from, date_to, None, []
     )
@@ -1000,6 +1041,7 @@ async def collection_summary_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     additional_filters = [CashVoucher.type == "receipt"]
     if scoped_franchise_id:
         additional_filters.append(CashVoucher.franchise_id == scoped_franchise_id)
@@ -1048,9 +1090,12 @@ async def outstanding_collection_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     additional_filters = [Invoice.status == "pending"]
     if scoped_franchise_id:
         additional_filters.append(Invoice.franchise_id == scoped_franchise_id)
+    elif scoped_warehouse_id:
+        additional_filters.append(Invoice.warehouse_id == scoped_warehouse_id)
 
     resolved_from, resolved_to, opening_balance = await _resolve_dates_and_opening(
         db, Invoice, Invoice.created_at, date_from, date_to, Invoice.total_amount, additional_filters
@@ -1063,6 +1108,8 @@ async def outstanding_collection_report(
     ]
     if scoped_franchise_id:
         filters.append(Invoice.franchise_id == scoped_franchise_id)
+    elif scoped_warehouse_id:
+        filters.append(Invoice.warehouse_id == scoped_warehouse_id)
     invoices = (await db.execute(select(Invoice).where(and_(*filters)).order_by(Invoice.created_at.asc()))).scalars().all()
     
     items = [
@@ -1096,6 +1143,7 @@ async def daily_collection_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     additional_filters = [CashVoucher.type == "receipt"]
     if scoped_franchise_id:
         additional_filters.append(CashVoucher.franchise_id == scoped_franchise_id)
@@ -1188,6 +1236,7 @@ async def cod_settlement_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     additional_filters = [
         Order.payment_method == "COD",
         Order.status == OrderStatus.DELIVERED,
@@ -1263,6 +1312,7 @@ async def cod_commission_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     additional_filters = [
         Order.payment_method == "COD",
         Order.status == OrderStatus.DELIVERED,
@@ -1323,6 +1373,7 @@ async def cash_book_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     additional_filters = []
     if scoped_franchise_id:
         additional_filters.append(CashVoucher.franchise_id == scoped_franchise_id)
@@ -1401,6 +1452,7 @@ async def expense_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     additional_filters = []
     if scoped_franchise_id:
         additional_filters.append(Expense.franchise_id == scoped_franchise_id)
@@ -1447,11 +1499,14 @@ async def profit_loss_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     
     # We resolve date using Order.created_at as primary transaction date
     additional_filters = []
     if scoped_franchise_id:
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
+    elif scoped_warehouse_id:
+        additional_filters.append(Order.warehouse_id == scoped_warehouse_id)
 
     resolved_from, resolved_to, _ = await _resolve_dates_and_opening(
         db, Order, Order.created_at, date_from, date_to, None, additional_filters
@@ -1489,7 +1544,7 @@ async def profit_loss_report(
     opening_profit = _to_float(opening_revenue - opening_expenses)
 
     # Calculate actual values in date range
-    filters_orders = _order_filters(scoped_franchise_id, resolved_from, resolved_to)
+    filters_orders = _order_filters(scoped_franchise_id, resolved_from, resolved_to, scoped_warehouse_id)
     revenue_sum = (await db.execute(
         select(func.coalesce(func.sum(Order.shipping_charge), 0))
         .where(and_(*filters_orders))
@@ -1550,15 +1605,18 @@ async def hsn_summary_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     additional_filters = []
     if scoped_franchise_id:
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
+    elif scoped_warehouse_id:
+        additional_filters.append(Order.warehouse_id == scoped_warehouse_id)
 
     resolved_from, resolved_to, opening_revenue = await _resolve_dates_and_opening(
         db, Order, Order.created_at, date_from, date_to, Order.shipping_charge, additional_filters
     )
 
-    filters = _order_filters(scoped_franchise_id, resolved_from, resolved_to)
+    filters = _order_filters(scoped_franchise_id, resolved_from, resolved_to, scoped_warehouse_id)
     revenue_sum = (await db.execute(
         select(func.coalesce(func.sum(Order.shipping_charge), 0))
         .where(and_(*filters))
@@ -1594,6 +1652,7 @@ async def gst_collection_summary(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     target_year = year or date.today().year
 
     start_of_year = datetime(target_year, 1, 1)
@@ -1602,6 +1661,8 @@ async def gst_collection_summary(
     additional_filters = []
     if scoped_franchise_id:
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
+    elif scoped_warehouse_id:
+        additional_filters.append(Order.warehouse_id == scoped_warehouse_id)
 
     opening_rev = (await db.execute(
         select(func.coalesce(func.sum(Order.shipping_charge), 0))
@@ -1678,9 +1739,12 @@ async def franchise_outstanding_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     additional_filters = [Invoice.status == "pending"]
     if scoped_franchise_id:
         additional_filters.append(Invoice.franchise_id == scoped_franchise_id)
+    elif scoped_warehouse_id:
+        additional_filters.append(Invoice.warehouse_id == scoped_warehouse_id)
 
     resolved_from, resolved_to, opening_pending = await _resolve_dates_and_opening(
         db, Invoice, Invoice.created_at, date_from, date_to, Invoice.total_amount, additional_filters
@@ -1693,6 +1757,8 @@ async def franchise_outstanding_report(
     ]
     if scoped_franchise_id:
         filters.append(Invoice.franchise_id == scoped_franchise_id)
+    elif scoped_warehouse_id:
+        filters.append(Invoice.warehouse_id == scoped_warehouse_id)
         
     invoices = (await db.execute(select(Invoice).where(and_(*filters)).order_by(Invoice.created_at.desc()))).scalars().all()
     items = [
@@ -1726,6 +1792,7 @@ async def franchise_collection_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     
     # Resolve dates
     resolved_from, resolved_to, _ = await _resolve_dates_and_opening(
@@ -1845,6 +1912,7 @@ async def franchise_profitability_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     
     # Resolve dates
     resolved_from, resolved_to, _ = await _resolve_dates_and_opening(
@@ -1941,9 +2009,12 @@ async def area_wise_business_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     additional_filters = []
     if scoped_franchise_id:
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
+    elif scoped_warehouse_id:
+        additional_filters.append(Order.warehouse_id == scoped_warehouse_id)
 
     resolved_from, resolved_to, opening_revenue = await _resolve_dates_and_opening(
         db, Order, Order.created_at, date_from, date_to, Order.shipping_charge, additional_filters
@@ -2017,6 +2088,7 @@ async def performance_dashboard_report(
     franchise_id: str | None = None,
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     
     # We resolve dates
     resolved_from, resolved_to, _ = await _resolve_dates_and_opening(
@@ -2127,6 +2199,7 @@ async def month_end_closing_report(
     query = select(MonthEndClosing)
     
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     if scoped_franchise_id:
         query = query.where(MonthEndClosing.franchise_id == scoped_franchise_id)
         

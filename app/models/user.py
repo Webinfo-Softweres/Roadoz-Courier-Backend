@@ -7,6 +7,7 @@ from app.core.database import Base
 
 if TYPE_CHECKING:
     from app.models.franchise import Franchise
+    from app.models.warehouse import WareHouseAddress
 
 class User(Base):
     __tablename__ = "users"
@@ -28,6 +29,15 @@ class User(Base):
         nullable=True,
         index=True,
     )
+    
+    # Warehouse linkage — set when a warehouse creates an employee
+    warehouse_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("warehouse_addresses.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    
     employee_code: Mapped[str | None] = mapped_column(
         String(80), unique=True, nullable=True, index=True
     )
@@ -39,4 +49,7 @@ class User(Base):
     # Relationships
     franchise: Mapped["Franchise"] = relationship(
         "Franchise", foreign_keys=[franchise_id], lazy="selectin"
+    )
+    warehouse: Mapped["WareHouseAddress"] = relationship(
+        "WareHouseAddress", foreign_keys=[warehouse_id], lazy="selectin"
     )

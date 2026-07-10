@@ -41,8 +41,12 @@ async def _resolve_franchise_id(db: AsyncSession, user: User) -> str | None:
     if user.franchise_id:
         return user.franchise_id
     result = await db.execute(select(Franchise).where(Franchise.user_id == user.id))
-    franchise = result.scalar_one_or_none()
+    franchise = result.scalars().first()
     return franchise.id if franchise else None
+
+async def _resolve_warehouse_id(db: AsyncSession, user: User) -> str | None:
+    from app.services.order_service import _resolve_warehouse_id as _wh
+    return await _wh(db, user)
 
 
 async def _generate_invoice_number(db: AsyncSession) -> str:
@@ -195,6 +199,7 @@ async def generate_invoice_for_order(db: AsyncSession, order_id: str) -> Invoice
         id=str(uuid.uuid4()),
         invoice_number=invoice_number,
         franchise_id=order.franchise_id,
+        warehouse_id=order.warehouse_id,
         description=f"Generated invoice for Order {order.order_number}",
         period_start=datetime.utcnow().date(),
         period_end=datetime.utcnow().date(),
@@ -266,6 +271,7 @@ async def generate_invoice_for_bulk_order(db: AsyncSession, bulk_order_id: str) 
         id=str(uuid.uuid4()),
         invoice_number=invoice_number,
         franchise_id=bulk_order.franchise_id,
+        warehouse_id=bulk_order.warehouse_id,
         description=f"Generated invoice for bulk upload {bulk_order.file_name}",
         period_start=datetime.utcnow().date(),
         period_end=datetime.utcnow().date(),
@@ -312,11 +318,9 @@ async def generate_invoice_for_bulk_order(db: AsyncSession, bulk_order_id: str) 
 #     limit: int = 25,
 #     franchise_id: str | None = None,
 # ) -> InvoiceListResponse:
-#     caller_role = await _get_caller_role_name(db, current_user.id)
-
 #     filters = []
-
-#     is_global = not await _resolve_franchise_id(db, current_user)
+#
+#     is_global = not await _resolve_franchise_id(db, current_user) and not await _resolve_warehouse_id(db, current_user)
 #     if is_global:
 #         if franchise_id:
 #             filters.append(Invoice.franchise_id == franchise_id)
@@ -328,19 +332,19 @@ async def generate_invoice_for_bulk_order(db: AsyncSession, bulk_order_id: str) 
 #                 detail="No franchise linked to this user",
 #             )
 #         filters.append(Invoice.franchise_id == fid)
-
+#
 #     query = select(Invoice).order_by(Invoice.created_at.desc())
 #     count_query = select(func.count()).select_from(Invoice)
-
+#
 #     for f in filters:
 #         query = query.where(f)
 #         count_query = count_query.where(f)
-
+#
 #     total = (await db.execute(count_query)).scalar_one()
 #     offset = (page - 1) * limit
 #     result = await db.execute(query.offset(offset).limit(limit))
 #     invoices = result.scalars().all()
-
+#
 #     return InvoiceListResponse(
 #         items=[InvoiceOut.model_validate(i) for i in invoices],
 #         total=total,
@@ -360,22 +364,24 @@ async def list_invoices(
     start_date: date | None = None,
     end_date: date | None = None,
 ) -> InvoiceListResponse:
-    caller_role = await _get_caller_role_name(db, current_user.id)
-
     filters = []
     
-    is_global = not await _resolve_franchise_id(db, current_user)
+    is_global = not await _resolve_franchise_id(db, current_user) and not await _resolve_warehouse_id(db, current_user)
     if is_global:
         if franchise_id:
             filters.append(Invoice.franchise_id == franchise_id)
     else:
         fid = await _resolve_franchise_id(db, current_user)
-        if not fid:
+        wid = await _resolve_warehouse_id(db, current_user)
+        if fid:
+            filters.append(Invoice.franchise_id == fid)
+        elif wid:
+            filters.append(Invoice.warehouse_id == wid)
+        else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No franchise linked to this user",
+                detail="No franchise or warehouse linked to this user",
             )
-        filters.append(Invoice.franchise_id == fid)    
     if invoice_number:
         filters.append(Invoice.invoice_number.ilike(f"%{invoice_number}%"))    
     if start_date:
@@ -418,10 +424,13 @@ async def get_invoice(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
 
     # Access control
-    is_global = not await _resolve_franchise_id(db, current_user)
+    is_global = not await _resolve_franchise_id(db, current_user) and not await _resolve_warehouse_id(db, current_user)
     if not is_global:
         fid = await _resolve_franchise_id(db, current_user)
-        if invoice.franchise_id != fid:
+        wid = await _resolve_warehouse_id(db, current_user)
+        if fid and invoice.franchise_id != fid:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        elif wid and invoice.warehouse_id != wid:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     return InvoiceOut.model_validate(invoice)
@@ -435,10 +444,13 @@ async def get_invoice_by_order(db: AsyncSession, order_id: str, current_user: Us
     invoice = result.scalar_one_or_none()
     if not invoice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
-    is_global = not await _resolve_franchise_id(db, current_user)
+    is_global = not await _resolve_franchise_id(db, current_user) and not await _resolve_warehouse_id(db, current_user)
     if not is_global:
         fid = await _resolve_franchise_id(db, current_user)
-        if invoice.franchise_id != fid:
+        wid = await _resolve_warehouse_id(db, current_user)
+        if fid and invoice.franchise_id != fid:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        elif wid and invoice.warehouse_id != wid:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     return InvoiceOut.model_validate(invoice)
 

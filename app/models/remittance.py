@@ -16,8 +16,11 @@ class Remittance(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
 
-    franchise_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("franchises.id", ondelete="CASCADE"), nullable=False, index=True
+    franchise_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("franchises.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    warehouse_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("warehouse_addresses.id", ondelete="CASCADE"), nullable=True, index=True
     )
 
     total_amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)

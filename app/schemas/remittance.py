@@ -37,7 +37,8 @@ class RemittanceOrderOut(BaseModel):
 
 class RemittanceOut(BaseModel):
     id: str
-    franchise_id: str
+    franchise_id: Optional[str] = None
+    warehouse_id: Optional[str] = None
     total_amount: float
     orders_count: int
     status: str
