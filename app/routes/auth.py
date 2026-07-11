@@ -78,6 +78,7 @@ async def refresh_token(request: RefreshTokenRequest, http_request: Request):
         from app.schemas.auth import WarehouseInfo
         warehouse_info = WarehouseInfo(
             id=payload["warehouse_id"],
+            warehouse_code=payload.get("warehouse_code", ""),
             nickname=payload.get("warehouse_nickname", ""),
             contact_name=payload.get("warehouse_contact_name", ""),
         )
