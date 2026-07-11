@@ -11,6 +11,7 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: str
     franchise_code: Optional[str] = None  # Required only for franchise login
+    warehouse_code: Optional[str] = None  # Required only for warehouse login
 
 
 class RoleCheckRequest(BaseModel):
@@ -30,6 +31,7 @@ class FranchiseInfo(BaseModel):
 
 class WarehouseInfo(BaseModel):
     id: str
+    warehouse_code: str
     nickname: str
     contact_name: str
 

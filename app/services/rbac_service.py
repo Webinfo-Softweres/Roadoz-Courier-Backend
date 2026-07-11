@@ -80,6 +80,7 @@ async def _build_user_out(db: AsyncSession, user: User) -> UserOut:
         address=user.address,
         location=user.location,
         franchise_id=user.franchise_id,
+        warehouse_id=user.warehouse_id,
         employee_code=user.employee_code,
         role=role_info,
         is_active=user.is_active,
@@ -540,22 +541,25 @@ async def delete_user(
 
 
 async def create_role(db: AsyncSession, data: RoleCreateRequest, current_user: User) -> RoleWithPermissionsOut:
-    result = await db.execute(select(Role).where(Role.name == data.name))
-    if result.scalar_one_or_none():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Role already exists")
-
     from app.services.order_service import _resolve_franchise_id, _resolve_warehouse_id
     own_franchise_id = await _resolve_franchise_id(db, current_user)
     own_warehouse_id = await _resolve_warehouse_id(db, current_user)
-    is_global = not own_franchise_id and not own_warehouse_id
 
-    franchise_id = None
-    warehouse_id = None
+    franchise_id = own_franchise_id if own_franchise_id else None
+    warehouse_id = own_warehouse_id if own_warehouse_id else None
 
-    if own_franchise_id:
-        franchise_id = own_franchise_id
-    elif own_warehouse_id:
-        warehouse_id = own_warehouse_id
+    # Check uniqueness within the creator's scope
+    query = select(Role).where(Role.name == data.name)
+    if franchise_id:
+        query = query.where(Role.franchise_id == franchise_id)
+    elif warehouse_id:
+        query = query.where(Role.warehouse_id == warehouse_id)
+    else:
+        query = query.where(Role.franchise_id.is_(None)).where(Role.warehouse_id.is_(None))
+
+    result = await db.execute(query)
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Role already exists")
 
     role = Role(id=str(uuid.uuid4()), name=data.name, franchise_id=franchise_id, warehouse_id=warehouse_id)
     db.add(role)

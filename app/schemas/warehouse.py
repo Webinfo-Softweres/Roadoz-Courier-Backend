@@ -19,6 +19,7 @@ class WarehouseCreate(BaseModel):
 
 class WarehouseResponse(BaseModel):
     id: str
+    warehouse_code: Optional[str] = None
     nickname: str
     contact_name: str
     phone: str

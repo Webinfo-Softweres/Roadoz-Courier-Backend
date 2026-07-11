@@ -134,6 +134,7 @@ async def list_warehouses(
                 "id": warehouse.id,
                 "user_id": warehouse.user_id,
                 "franchise_id": warehouse.franchise_id,
+                "warehouse_code":warehouse.warehouse_code,
                 "nickname": warehouse.nickname,
                 "contact_name": warehouse.contact_name,
                 "phone": warehouse.phone,
@@ -233,10 +234,23 @@ async def delete_warehouse_address(
         select(WareHouseAddress).where(WareHouseAddress.id == warehouse_address_id))
     warehouse_address = result.scalar_one_or_none()
     if not warehouse_address:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="Warehouse address not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Warehouse address not found")
+
+    # Delete user_roles for any roles owned by this warehouse to avoid FK constraint failure
+    from app.models.role import Role
+    from app.models.user_role import UserRole
+    warehouse_roles_result = await db.execute(
+        select(Role).where(Role.warehouse_id == warehouse_address_id)
+    )
+    warehouse_roles = warehouse_roles_result.scalars().all()
+    for role in warehouse_roles:
+        await db.execute(
+            UserRole.__table__.delete().where(UserRole.role_id == role.id)
+        )
+
     await db.delete(warehouse_address)
     await db.commit()
-    return {"success": True,"message": "Warehouse address deleted successfully"}
+    return {"success": True, "message": "Warehouse address deleted successfully"}
     
     
     

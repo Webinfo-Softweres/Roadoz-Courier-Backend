@@ -16,7 +16,7 @@ class Role(Base):
     __tablename__ = "roles"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     franchise_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("franchises.id", ondelete="CASCADE"), nullable=True, index=True)
     warehouse_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("warehouse_addresses.id", ondelete="CASCADE"), nullable=True, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("1"))
