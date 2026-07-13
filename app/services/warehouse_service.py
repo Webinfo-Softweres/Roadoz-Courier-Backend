@@ -57,10 +57,34 @@ async def create_warehouse(db: AsyncSession, data: WarehouseCreate, current_user
         )
     db.add(UserRole(user_id=new_user.id, role_id=warehouse_role.id))
 
+    # Generate warehouse_code
+    from app.models.warehouse_code_counter import WarehouseCodeCounter
+    from datetime import datetime
+    year = datetime.utcnow().year
+    loc_code = (data.city or "")[:3].upper().ljust(3, "X")
+
+    result = await db.execute(
+        select(WarehouseCodeCounter)
+        .where(WarehouseCodeCounter.year == year)
+        .with_for_update()
+    )
+    counter = result.scalar_one_or_none()
+    if not counter:
+        counter = WarehouseCodeCounter(year=year, last_sequence=1)
+        db.add(counter)
+        sequence = 1
+    else:
+        counter.last_sequence += 1
+        sequence = counter.last_sequence
+
+    await db.flush()
+    warehouse_code = f"WH-{loc_code}-{year}-{str(sequence).zfill(4)}"
+
     # Create new warehouse linked to the new user
     warehouse = WareHouseAddress(
         user_id=str(new_user.id),
         franchise_id=franchise_id,
+        warehouse_code=warehouse_code,
         nickname=data.nickname,
         contact_name=data.contact_name,
         phone=data.phone,

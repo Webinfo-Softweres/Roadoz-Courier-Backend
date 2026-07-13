@@ -6,7 +6,7 @@ from app.core.database import get_db
 from app.dependencies.role_checker import get_current_user, require_permission
 from app.models.user import User
 from app.models.order import BulkOrder, Order
-from app.services.order_service import _resolve_franchise_id
+from app.services.order_service import _resolve_franchise_id, _resolve_warehouse_id
 
 router = APIRouter(prefix="/bulk-orders", tags=["Bulk Orders"])
 
@@ -18,7 +18,7 @@ async def delete_bulk_order(
     _: User = Depends(require_permission("bulk_orders:delete"))
 ):
     franchise_id = await _resolve_franchise_id(db, current_user)
-    is_global = not franchise_id
+    is_global = not franchise_id and not await _resolve_warehouse_id(db, current_user)
 
     result = await db.execute(select(BulkOrder).where(BulkOrder.id == bulk_order_id))
     bulk_order = result.scalar_one_or_none()

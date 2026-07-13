@@ -37,6 +37,7 @@ class UserOut(BaseModel):
     address: Optional[str] = None
     location: Optional[str] = None
     franchise_id: Optional[str] = None
+    warehouse_id: Optional[str] = None
     employee_code: Optional[str] = None
     role: Optional[RoleInfo] = None
     is_active: bool

@@ -35,18 +35,30 @@ async def _get_caller_role_name(db: AsyncSession, user_id: str) -> str | None:
 async def _resolve_franchise_id(db: AsyncSession, user: User) -> str | None:
     if user.franchise_id:
         return user.franchise_id
-    franchise = (await db.execute(select(Franchise).where(Franchise.user_id == user.id))).scalar_one_or_none()
+    franchise = (await db.execute(select(Franchise).where(Franchise.user_id == user.id))).scalars().first()
     return franchise.id if franchise else None
+
+async def _resolve_warehouse_id(db: AsyncSession, user: User) -> str | None:
+    from app.services.order_service import _resolve_warehouse_id as _wh
+    return await _wh(db, user)
 
 
 async def _scope_franchise_id(db: AsyncSession, current_user: User, franchise_id: str | None) -> str | None:
     own_franchise_id = await _resolve_franchise_id(db, current_user)
-    is_global = not own_franchise_id
+    is_global = not own_franchise_id and not await _resolve_warehouse_id(db, current_user)
     if is_global:
         return franchise_id
     if franchise_id and franchise_id != own_franchise_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied for this franchise")
     return own_franchise_id
+
+
+async def _scope_warehouse_id(db: AsyncSession, current_user: User, warehouse_id: str | None) -> str | None:
+    """Return warehouse_id scoped to current user (warehouse users only see their own)."""
+    own_warehouse_id = await _resolve_warehouse_id(db, current_user)
+    if not own_warehouse_id:
+        return warehouse_id  # super admin can specify any
+    return own_warehouse_id
 
 
 async def _generate_voucher_no(db: AsyncSession) -> str:
@@ -61,9 +73,11 @@ async def _generate_manifest_no(db: AsyncSession) -> str:
 
 async def create_expense(db: AsyncSession, data: ExpenseCreate, current_user: User) -> ExpenseOut:
     franchise_id = await _scope_franchise_id(db, current_user, data.franchise_id)
+    warehouse_id = await _scope_warehouse_id(db, current_user, getattr(data, 'warehouse_id', None))
     expense = Expense(
         id=str(uuid.uuid4()),
         franchise_id=franchise_id,
+        warehouse_id=warehouse_id,
         expense_date=data.expense_date,
         expense_head=data.expense_head,
         amount=data.amount,
@@ -79,9 +93,12 @@ async def create_expense(db: AsyncSession, data: ExpenseCreate, current_user: Us
 
 async def list_expenses(db: AsyncSession, current_user: User, page: int, limit: int, date_from: date | None, date_to: date | None, franchise_id: str | None) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user, None)
     filters = []
     if scoped_franchise_id:
         filters.append(Expense.franchise_id == scoped_franchise_id)
+    elif scoped_warehouse_id:
+        filters.append(Expense.warehouse_id == scoped_warehouse_id)
     if date_from:
         filters.append(Expense.expense_date >= date_from)
     if date_to:
@@ -94,10 +111,12 @@ async def list_expenses(db: AsyncSession, current_user: User, page: int, limit: 
 
 async def create_cash_voucher(db: AsyncSession, data: CashVoucherCreate, current_user: User) -> CashVoucherOut:
     franchise_id = await _scope_franchise_id(db, current_user, data.franchise_id)
+    warehouse_id = await _scope_warehouse_id(db, current_user, getattr(data, 'warehouse_id', None))
     voucher = CashVoucher(
         id=str(uuid.uuid4()),
         voucher_no=await _generate_voucher_no(db),
         franchise_id=franchise_id,
+        warehouse_id=warehouse_id,
         voucher_date=data.voucher_date,
         type=data.type,
         amount=data.amount,
@@ -113,9 +132,12 @@ async def create_cash_voucher(db: AsyncSession, data: CashVoucherCreate, current
 
 async def list_cash_vouchers(db: AsyncSession, current_user: User, page: int, limit: int, date_from: date | None, date_to: date | None, franchise_id: str | None) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user, None)
     filters = []
     if scoped_franchise_id:
         filters.append(CashVoucher.franchise_id == scoped_franchise_id)
+    elif scoped_warehouse_id:
+        filters.append(CashVoucher.warehouse_id == scoped_warehouse_id)
     if date_from:
         filters.append(CashVoucher.voucher_date >= date_from)
     if date_to:
@@ -130,7 +152,8 @@ async def create_attendance(db: AsyncSession, data: AttendanceCreate, current_us
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     franchise_id = await _scope_franchise_id(db, current_user, data.franchise_id or user.franchise_id)
-    attendance = StaffAttendance(id=str(uuid.uuid4()), user_id=data.user_id, franchise_id=franchise_id, attendance_date=data.attendance_date, check_in=data.check_in, check_out=data.check_out, status=data.status, remarks=data.remarks)
+    warehouse_id = await _scope_warehouse_id(db, current_user, getattr(data, 'warehouse_id', None))
+    attendance = StaffAttendance(id=str(uuid.uuid4()), user_id=data.user_id, franchise_id=franchise_id, warehouse_id=warehouse_id, attendance_date=data.attendance_date, check_in=data.check_in, check_out=data.check_out, status=data.status, remarks=data.remarks)
     db.add(attendance)
     await db.flush()
     await db.refresh(attendance)
@@ -139,9 +162,12 @@ async def create_attendance(db: AsyncSession, data: AttendanceCreate, current_us
 
 async def list_attendance(db: AsyncSession, current_user: User, page: int, limit: int, attendance_date: date | None, franchise_id: str | None) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user, None)
     filters = []
     if scoped_franchise_id:
         filters.append(StaffAttendance.franchise_id == scoped_franchise_id)
+    elif scoped_warehouse_id:
+        filters.append(StaffAttendance.warehouse_id == scoped_warehouse_id)
     if attendance_date:
         filters.append(StaffAttendance.attendance_date == attendance_date)
     total = (await db.execute(select(func.count()).select_from(StaffAttendance).where(and_(*filters)))).scalar_one()

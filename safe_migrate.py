@@ -60,15 +60,15 @@ def get_migration_history():
 
 def stamp_revision(revision, purge=False):
     """Force-set the alembic_version tracker to a specific revision."""
-    print(f"  ⚙ Stamping database to revision: {revision}")
+    print(f"  * Stamping database to revision: {revision}")
     cmd = f"{ALEMBIC_CMD} stamp {revision}"
     if purge:
         cmd += " --purge"
     code, out, err = run(cmd)
     if code != 0:
-        print(f"  ✗ Stamp failed: {err}")
+        print(f"  X Stamp failed: {err}")
         return False
-    print(f"  ✓ Database stamped to {revision}")
+    print(f"  + Database stamped to {revision}")
     return True
 
 
@@ -138,18 +138,18 @@ def main():
         return 0
 
     # Step 2: Try normal upgrade
-    print("\n── Attempting migration upgrade ──")
+    print("\n-- Attempting migration upgrade --")
     code, output = try_upgrade()
 
     if code == 0:
-        print("  ✓ Migration completed successfully!")
+        print("  + Migration completed successfully!")
         # Verify
         new_current, _ = get_current_revision()
         print(f"  Database is now at: {new_current}")
         return 0
 
     # Step 3: Migration failed — diagnose and fix
-    print("  ✗ Migration failed. Diagnosing...")
+    print("  X Migration failed. Diagnosing...")
     error_type, error_detail = detect_error_type(output)
     print(f"  Error type: {error_type}")
     if error_detail:
@@ -157,25 +157,25 @@ def main():
 
     if error_type in ("MISSING_REVISION", "BROKEN_CHAIN", "DUPLICATE_COLUMN", "DUPLICATE_TABLE"):
         target = find_safe_stamp_target(head, error_type)
-        print(f"\n── Auto-fixing: stamping database to {target} ──")
+        print(f"\n-- Auto-fixing: stamping database to {target} --")
         print("  This aligns Alembic version history and resolves errors.")
         print("  (The actual columns/tables already exist in the database.)")
 
         purge = error_type in ("MISSING_REVISION", "BROKEN_CHAIN")
         if stamp_revision(target, purge=purge):
-            print("\n  ✓ Fix applied! Database tracker is now in sync.")
+            print("\n  + Fix applied! Database tracker is now in sync.")
             # Verify one more time
             verify_code, verify_output = try_upgrade()
             if verify_code == 0:
-                print("  ✓ Verification passed — no pending migrations.")
+                print("  + Verification passed -- no pending migrations.")
             else:
-                print(f"  ⚠ Post-fix verification output: {verify_output}")
+                print(f"  ! Post-fix verification output: {verify_output}")
             return 0
         else:
-            print("  ✗ Auto-fix failed. Manual intervention required.")
+            print("  X Auto-fix failed. Manual intervention required.")
             return 1
     else:
-        print(f"\n  ✗ Unknown error type. Full output below:")
+        print(f"\n  X Unknown error type. Full output below:")
         print(output)
         print("\n  Manual intervention required.")
         return 1

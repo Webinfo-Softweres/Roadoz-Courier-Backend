@@ -81,15 +81,21 @@ async def authenticate_user(db: AsyncSession, request: LoginRequest, http_reques
         if not franchise.is_active:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Franchise account is disabled")
     elif role_name == "warehouse":
+        if not request.warehouse_code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Warehouse code is required for warehouse login",
+            )
         from app.models.warehouse import WareHouseAddress
         result = await db.execute(
             select(WareHouseAddress).where(
                 WareHouseAddress.user_id == user.id,
+                WareHouseAddress.warehouse_code == request.warehouse_code,
             )
         )
         warehouse = result.scalar_one_or_none()
         if not warehouse:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Warehouse account not found")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid warehouse code or account not found")
     else:
         # For employees, resolve their parent franchise
         franchise = await _resolve_franchise(db, user, role_name)
@@ -111,6 +117,7 @@ async def authenticate_user(db: AsyncSession, request: LoginRequest, http_reques
         "franchise_id": franchise.id if franchise else None,
         "franchise_code": franchise.franchise_code if franchise else None,
         "warehouse_id": warehouse.id if warehouse else None,
+        "warehouse_code": warehouse.warehouse_code if warehouse else None,
         "warehouse_nickname": warehouse.nickname if warehouse else None,
         "warehouse_contact_name": warehouse.contact_name if warehouse else None,
     }
@@ -127,6 +134,7 @@ async def authenticate_user(db: AsyncSession, request: LoginRequest, http_reques
     if warehouse:
         warehouse_info = WarehouseInfo(
             id=warehouse.id,
+            warehouse_code=warehouse.warehouse_code,
             nickname=warehouse.nickname,
             contact_name=warehouse.contact_name,
         )

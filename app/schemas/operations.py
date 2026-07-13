@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 class ExpenseCreate(BaseModel):
     franchise_id: Optional[str] = None
+    warehouse_id: Optional[str] = None
     expense_date: date
     expense_head: str = Field(..., min_length=1, max_length=100)
     amount: float = Field(..., gt=0)
@@ -16,6 +17,7 @@ class ExpenseCreate(BaseModel):
 class ExpenseOut(BaseModel):
     id: str
     franchise_id: Optional[str]
+    warehouse_id: Optional[str] = None
     expense_date: date
     expense_head: str
     amount: float
@@ -29,6 +31,7 @@ class ExpenseOut(BaseModel):
 
 class CashVoucherCreate(BaseModel):
     franchise_id: Optional[str] = None
+    warehouse_id: Optional[str] = None
     voucher_date: date
     type: str = Field(..., pattern="^(debit|credit)$")
     amount: float = Field(..., gt=0)
@@ -40,6 +43,7 @@ class CashVoucherOut(BaseModel):
     id: str
     voucher_no: str
     franchise_id: Optional[str]
+    warehouse_id: Optional[str] = None
     voucher_date: date
     type: str
     amount: float
@@ -54,6 +58,7 @@ class CashVoucherOut(BaseModel):
 class AttendanceCreate(BaseModel):
     user_id: str
     franchise_id: Optional[str] = None
+    warehouse_id: Optional[str] = None
     attendance_date: date
     check_in: Optional[datetime] = None
     check_out: Optional[datetime] = None

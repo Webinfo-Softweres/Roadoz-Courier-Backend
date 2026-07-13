@@ -364,6 +364,7 @@ class OrderOut(BaseModel):
     status: str
     created_by: str
     franchise_id: Optional[str] = None
+    warehouse_id: Optional[str] = None
     franchise: Optional[FranchiseResponse] = None
     creator: Optional[UserResponse] = None
     created_at: datetime

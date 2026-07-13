@@ -7,7 +7,7 @@ from app.dependencies.role_checker import get_current_user, require_permission
 from app.models.user import User
 from app.models.order import Order
 from app.models.invoice import InvoiceOrder
-from app.services.order_service import _resolve_franchise_id
+from app.services.order_service import _resolve_franchise_id, _resolve_warehouse_id
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -133,7 +133,7 @@ async def get_single_order_label_data(
     
     # Check permissions
     franchise_id = await _resolve_franchise_id(db, current_user)
-    is_global = not franchise_id
+    is_global = not franchise_id and not await _resolve_warehouse_id(db, current_user)
     
     if not is_global and order.franchise_id != franchise_id:
         raise HTTPException(

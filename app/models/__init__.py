@@ -11,6 +11,7 @@ from app.models import consigeereview
 from app.models import consignee
 from app.models import franchise
 from app.models import franchise_code_counter
+from app.models import warehouse_code_counter
 from app.models import invoice
 from app.models import kyc
 from app.models import notification

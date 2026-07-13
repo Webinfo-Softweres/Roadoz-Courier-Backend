@@ -17,6 +17,8 @@ class RoleUpdateRequest(BaseModel):
 class RoleOut(BaseModel):
     id: str
     name: str
+    franchise_id: Optional[str] = None
+    warehouse_id: Optional[str] = None
     is_active: bool
     created_at: datetime
     updated_at: datetime
