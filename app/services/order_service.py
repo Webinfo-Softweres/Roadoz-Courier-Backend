@@ -328,6 +328,7 @@ async def search_pickup_addresses(
     db: AsyncSession,
     current_user: User,
     search: str | None = None,
+    city: str | None = None,
     page: int = 1,
     limit: int = 10,) -> PickupAddressListResponse:
     franchise_id = await _resolve_franchise_id(db, current_user)
@@ -350,6 +351,13 @@ async def search_pickup_addresses(
         )
         query = query.where(search_filter)
         count_query = count_query.where(search_filter)
+        
+    if city:
+        city_filter = PickupAddress.city.ilike(f"%{city}%")
+        query = query.where(city_filter)
+        count_query = count_query.where(city_filter)
+        
+        
     total = (await db.execute(count_query)).scalar_one()
     offset = (page - 1) * limit
     result = await db.execute(query.order_by(PickupAddress.created_at.desc()).offset(offset).limit(limit))
