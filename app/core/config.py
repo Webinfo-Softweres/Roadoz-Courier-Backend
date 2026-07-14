@@ -6,7 +6,10 @@ import secrets
 class Settings(BaseSettings):
     # Database (SQLite by default — swap for postgresql+asyncpg://... in production)
     DATABASE_URL: str = "sqlite+aiosqlite:///./franchise.db"
-
+    
+    # here Geocoding api key
+    HERE_API_KEY :str
+    
     # JWT
     SECRET_KEY: str = secrets.token_urlsafe(32)
     ALGORITHM: str = "HS256"
