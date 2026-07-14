@@ -137,12 +137,13 @@ def _lazy_decode(image):
 @router.get("/pickup-addresses", response_model=PickupAddressListResponse)
 async def search_pickup_addresses_endpoint(
     search: Optional[str] = Query(None,description="Search by nickname, contact name, address, city, or pincode",),
+    city: Optional[str] = Query(None, description="Search by city"),
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=10),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: User = Depends(require_permission("pickup_addresses:view")),):
-    return await search_pickup_addresses(db=db,current_user=current_user,search=search,page=page,limit=limit,)
+    return await search_pickup_addresses(db=db,current_user=current_user,search=search,city=city,page=page,limit=limit,)
 
 
 
