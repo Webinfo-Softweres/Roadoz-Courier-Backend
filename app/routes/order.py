@@ -100,6 +100,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
+from app.core.config import settings
+import httpx
+import os
 
 
 
@@ -134,12 +137,13 @@ def _lazy_decode(image):
 @router.get("/pickup-addresses", response_model=PickupAddressListResponse)
 async def search_pickup_addresses_endpoint(
     search: Optional[str] = Query(None,description="Search by nickname, contact name, address, city, or pincode",),
+    city: Optional[str] = Query(None, description="Search by city"),
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=10),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: User = Depends(require_permission("pickup_addresses:view")),):
-    return await search_pickup_addresses(db=db,current_user=current_user,search=search,page=page,limit=limit,)
+    return await search_pickup_addresses(db=db,current_user=current_user,search=search,city=city,page=page,limit=limit,)
 
 
 
@@ -1270,65 +1274,62 @@ def get_redis_client():
 
 
 
-# import httpx
-# import os
 
-# HERE_API_KEY = os.getenv("HERE_API_KEY")  # Store in environment variable
+async def get_pincode_from_lat_lng(lat: float, lng: float):
+    """Get pincode from GPS coordinates using HERE Reverse Geocoding API"""
+    try:
+        url = "https://revgeocode.search.hereapi.com/v1/revgeocode"
+        params = {"at": f"{lat},{lng}","lang": "en-US","apikey": settings.HERE_API_KEY,}
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(url, params=params)
+        if response.status_code != 200:
+            print(f"HERE API Error: {response.status_code} - {response.text}")
+            return None
+        data = response.json()
+        items = data.get("items", [])
+        print('lat',lat,'lng',lng)
+        print('itse,.....................................',items)
+        if not items:
+            return None
+        address = items[0].get("address", {})
+        pincode = address.get("postalCode")
+        if pincode:
+            pincode = str(pincode).replace(".0", "").strip()
+            pincode = "".join(filter(str.isdigit, pincode))
+        return {
+            "pincode": pincode,
+            "city": (address.get("city")or address.get("district")or address.get("county")),
+            "state": address.get("state"),
+            "country": address.get("countryName"),}
+    except Exception as e:
+        print(f"HERE Geocoding error: {e}")
+        return None
+
 
 
 # async def get_pincode_from_lat_lng(lat: float, lng: float):
-#     """Get pincode from GPS coordinates using HERE Reverse Geocoding API"""
+#     """Get pincode from GPS coordinates"""
 #     try:
-#         url = "https://revgeocode.search.hereapi.com/v1/revgeocode"
-#         params = {"at": f"{lat},{lng}","lang": "en-US","apikey": HERE_API_KEY,}
+#         url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lng}&format=json"
 #         async with httpx.AsyncClient(timeout=10.0) as client:
-#             response = await client.get(url, params=params)
-#         if response.status_code != 200:
-#             print(f"HERE API Error: {response.status_code} - {response.text}")
-#             return None
-#         data = response.json()
-#         items = data.get("items", [])
-#         if not items:
-#             return None
-#         address = items[0].get("address", {})
-#         pincode = address.get("postalCode")
-#         if pincode:
-#             pincode = str(pincode).replace(".0", "").strip()
-#             pincode = "".join(filter(str.isdigit, pincode))
-#         return {
-#             "pincode": pincode,
-#             "city": (address.get("city")or address.get("district")or address.get("county")),
-#             "state": address.get("state"),
-#             "country": address.get("countryName"),}
-#     except Exception as e:
-#         print(f"HERE Geocoding error: {e}")
+#             response = await client.get(url, headers={"User-Agent": "courier-app"})
+#         if response.status_code == 200:
+#             data = response.json()
+#             address = data.get("address", {})
+#             pincode = address.get("postcode")
+#             if pincode:
+#                 pincode = str(pincode).replace(".0", "").strip()
+#                 pincode = "".join(filter(str.isdigit, pincode))
+#             return {
+#                 "pincode": pincode,
+#                 "city": address.get("city") or address.get("town") or address.get("village"),
+#                 "state": address.get("state"),
+#                 "country": address.get("country"),
+#             }
 #         return None
-
-
-
-async def get_pincode_from_lat_lng(lat: float, lng: float):
-    """Get pincode from GPS coordinates"""
-    try:
-        url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lng}&format=json"
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(url, headers={"User-Agent": "courier-app"})
-        if response.status_code == 200:
-            data = response.json()
-            address = data.get("address", {})
-            pincode = address.get("postcode")
-            if pincode:
-                pincode = str(pincode).replace(".0", "").strip()
-                pincode = "".join(filter(str.isdigit, pincode))
-            return {
-                "pincode": pincode,
-                "city": address.get("city") or address.get("town") or address.get("village"),
-                "state": address.get("state"),
-                "country": address.get("country"),
-            }
-        return None
-    except Exception as e:
-        print(f"Geocoding error: {str(e)}")
-        return None
+#     except Exception as e:
+#         print(f"Geocoding error: {str(e)}")
+#         return None
 
 
 def build_order_warehousestatus(warehouse_count: int, warehouse_index: int) -> str:
