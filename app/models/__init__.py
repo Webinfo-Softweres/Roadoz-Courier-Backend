@@ -2,6 +2,7 @@ from app.models.projectreview import ProjectReview
 from app.models.rate_calculator import RateZone, RateCard, FuelConfig, GSTConfig, PincodeServiceability
 from app.modules.rate_calculator.models.pricing_rule import PricingRule
 from app.modules.rate_calculator.models.pricing_zone import PricingZone
+from app.modules.fleet.models import Driver, Vehicle, FleetFile, DriverPayoutAccount
 from app.models.operations import Expense, CashVoucher, StaffAttendance, Manifest, ManifestOrder, PodRecord
 
 # Import all other models to ensure they are registered in the SQLAlchemy metadata
