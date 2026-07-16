@@ -26,6 +26,7 @@ from app.core.config import settings
 from app.models.consigeeauth import AuthUser,AuthUserProfile
 from app.models.consigeereview import ProductReview
 from app.models.user_franchise import FranchiseApplicationbyUser
+from app.modules.fleet.models import Driver, Vehicle, FleetFile, DriverPayoutAccount  # noqa: F401
 from app.models.projectreview import ProjectReview
 from app.models.user_admincommunication import AdminandUserMessage
 from app.models.warehouse import OrderWarehouseAddress
