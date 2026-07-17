@@ -1,7 +1,7 @@
 import uuid
 from typing import TYPE_CHECKING
 from datetime import datetime, date
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, Date, Integer, text
+from sqlalchemy import String, Boolean, DateTime, ForeignKey, Date, Integer, text, DECIMAL
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
@@ -87,6 +87,9 @@ class Franchise(Base):
     nearby_landmark: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # pin_codes_covered: Mapped[str | None] = mapped_column(String(500), nullable=True)
     pincode: Mapped[str] = mapped_column(String(6), nullable=False)
+
+    latitude: Mapped[float | None] = mapped_column(DECIMAL(18, 8), nullable=True)
+    longitude: Mapped[float | None] = mapped_column(DECIMAL(18, 8), nullable=True)
 
     # Documents
     doc_id_proof: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))

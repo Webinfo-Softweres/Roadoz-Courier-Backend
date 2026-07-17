@@ -15,7 +15,7 @@ from app.middleware.auth_middleware import RequestLoggingMiddleware, SecurityHea
 from app.routes import auth, franchise, orderreview,projectreview , profile, websocket, rbac, order, remittance, invoice,warehouse
 from app.middleware.auth_middleware import RequestLoggingMiddleware, SecurityHeadersMiddleware, ActivityLoggingMiddleware
 from app.routes import auth, franchise, profile, websocket, rbac, order, remittance, invoice,warehouse, activity_log,consigeeauth,coningeereview,webconfiguration,notification
-from app.routes import auth, franchise, profile, websocket, rbac, order, remittance, invoice,warehouse, activity_log,consigeeauth,coningeereview,webconfiguration, analytics,user_admincommunication, rate_calculator, reports, prints, operations
+from app.routes import auth, franchise, profile, websocket, rbac, order, remittance, invoice,warehouse, activity_log,consigeeauth,coningeereview,webconfiguration, analytics,user_admincommunication, rate_calculator, reports, prints, operations, location
 from app.routes import bulk_order, bag,label,user_franchise,consigeeuserorder, month_end_closing
 from app.models.activity_log import ActivityLog
 from app.middleware.maintenance_middleware import MaintenanceMiddleware
@@ -145,6 +145,8 @@ DEFAULT_PERMISSIONS = [
     ("month_end_closing", "submit", "Submit month end closing payments"),
     ("month_end_closing", "view", "View month end closing records"),
     ("month_end_closing", "approve", "Approve month end closing payments"),
+    # Location Reset
+    ("reset", "location", "Reset warehouse or franchise location"),
 ]
 
 
@@ -360,6 +362,7 @@ app.include_router(label.router,prefix=API_PREFIX)
 app.include_router(user_franchise.router,prefix=API_PREFIX)
 app.include_router(consigeeuserorder.router,prefix=API_PREFIX)
 app.include_router(month_end_closing.router,prefix=API_PREFIX)
+app.include_router(location.router,prefix=API_PREFIX)
 
 
 @app.get("/", tags=["Health"])
