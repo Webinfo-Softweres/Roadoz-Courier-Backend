@@ -22,7 +22,7 @@ import re
 import os
 
 # ── Configuration ──────────────────────────────────────────────────
-ALEMBIC_CMD = r"venv\Scripts\alembic"
+ALEMBIC_CMD = "alembic"
 
 
 def run(cmd, capture=True):

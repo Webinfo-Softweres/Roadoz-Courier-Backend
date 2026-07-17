@@ -17,6 +17,8 @@ from app.middleware.auth_middleware import RequestLoggingMiddleware, SecurityHea
 from app.routes import auth, franchise, profile, websocket, rbac, order, remittance, invoice,warehouse, activity_log,consigeeauth,coningeereview,webconfiguration,notification
 from app.routes import auth, franchise, profile, websocket, rbac, order, remittance, invoice,warehouse, activity_log,consigeeauth,coningeereview,webconfiguration, analytics,user_admincommunication, rate_calculator, reports, prints, operations, location
 from app.routes import bulk_order, bag,label,user_franchise,consigeeuserorder, month_end_closing
+from app.modules.fleet.routes import mobile as fleet_mobile
+from app.modules.fleet.routes import admin as fleet_admin
 from app.models.activity_log import ActivityLog
 from app.middleware.maintenance_middleware import MaintenanceMiddleware
 
@@ -145,8 +147,12 @@ DEFAULT_PERMISSIONS = [
     ("month_end_closing", "submit", "Submit month end closing payments"),
     ("month_end_closing", "view", "View month end closing records"),
     ("month_end_closing", "approve", "Approve month end closing payments"),
-    # Location Reset
+
     ("reset", "location", "Reset warehouse or franchise location"),
+    # Fleet drivers
+    ("fleet", "drivers:view", "View driver onboarding queue"),
+    ("fleet", "drivers:approve", "Approve or reject driver applications"),
+
 ]
 
 
@@ -217,6 +223,68 @@ async def _seed_default_role_permissions():
         logger.info("Default role permissions seeded")
 
 
+FLEET_ADMIN_PERMISSIONS = ["fleet:drivers:view", "fleet:drivers:approve"]
+
+
+async def _seed_driver_role():
+    """Ensure driver role exists and super_admin has fleet admin permissions."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.role import Role
+    from app.models.permission import Permission
+    from app.models.role_permission import RolePermission
+    from sqlalchemy import select
+    import uuid
+
+    async with AsyncSessionLocal() as db:
+        driver_role = (
+            await db.execute(
+                select(Role).where(
+                    Role.name == "driver",
+                    Role.franchise_id.is_(None),
+                    Role.warehouse_id.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if not driver_role:
+            driver_role = Role(id=str(uuid.uuid4()), name="driver")
+            db.add(driver_role)
+            await db.flush()
+            logger.info("Driver role seeded")
+
+        super_admin_role = (
+            await db.execute(
+                select(Role).where(
+                    Role.name == "super_admin",
+                    Role.franchise_id.is_(None),
+                    Role.warehouse_id.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if super_admin_role:
+            for code in FLEET_ADMIN_PERMISSIONS:
+                perm = (await db.execute(select(Permission).where(Permission.code == code))).scalar_one_or_none()
+                if not perm:
+                    continue
+                exists = await db.execute(
+                    select(RolePermission).where(
+                        RolePermission.role_id == super_admin_role.id,
+                        RolePermission.permission_id == perm.id,
+                    )
+                )
+                if not exists.scalar_one_or_none():
+                    db.add(
+                        RolePermission(
+                            id=str(uuid.uuid4()),
+                            role_id=super_admin_role.id,
+                            permission_id=perm.id,
+                        )
+                    )
+                    logger.info(f"Linked {code} -> role 'super_admin'")
+
+        await db.commit()
+        logger.info("Driver role and fleet admin permissions ensured")
+
+
 import asyncio
 from datetime import datetime, timedelta
 from app.core.database import AsyncSessionLocal
@@ -246,6 +314,7 @@ async def lifespan(app: FastAPI):
     await _seed_permissions()
     await _seed_super_admin()
     await _seed_default_role_permissions()
+    await _seed_driver_role()
     
     # Start background tasks
     cleanup_task = asyncio.create_task(_cleanup_activity_logs())
@@ -278,24 +347,42 @@ app = FastAPI(
 
 
 @app.exception_handler(HTTPException)
-async def http_exception_handler(_: Request, exc: HTTPException):
+async def http_exception_handler(request: Request, exc: HTTPException):
+    from app.modules.fleet.mobile_errors import is_mobile_fleet_path, mobile_error_response
+
+    if is_mobile_fleet_path(request.url.path):
+        message = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        return mobile_error_response(exc.status_code, message)
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(_: Request, exc: RequestValidationError):
-    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(exc.errors())})
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    from app.modules.fleet.mobile_errors import is_mobile_fleet_path, mobile_error_response, validation_error_message
+
+    errors = jsonable_encoder(exc.errors())
+    if is_mobile_fleet_path(request.url.path):
+        return mobile_error_response(422, validation_error_message(errors))
+    return JSONResponse(status_code=422, content={"detail": errors})
 
 
 @app.exception_handler(IntegrityError)
-async def integrity_error_handler(_: Request, exc: IntegrityError):
+async def integrity_error_handler(request: Request, exc: IntegrityError):
+    from app.modules.fleet.mobile_errors import is_mobile_fleet_path, mobile_error_response
+
     logger.exception("IntegrityError", exc_info=exc)
+    if is_mobile_fleet_path(request.url.path):
+        return mobile_error_response(409, "Database constraint violated")
     return JSONResponse(status_code=409, content={"detail": "Database constraint violated"})
 
 
 @app.exception_handler(Exception)
-async def unhandled_exception_handler(_: Request, exc: Exception):
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    from app.modules.fleet.mobile_errors import is_mobile_fleet_path, mobile_error_response
+
     logger.exception("Unhandled exception", exc_info=exc)
+    if is_mobile_fleet_path(request.url.path):
+        return mobile_error_response(500, "Internal server error")
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 from fastapi.staticfiles import StaticFiles
@@ -362,7 +449,11 @@ app.include_router(label.router,prefix=API_PREFIX)
 app.include_router(user_franchise.router,prefix=API_PREFIX)
 app.include_router(consigeeuserorder.router,prefix=API_PREFIX)
 app.include_router(month_end_closing.router,prefix=API_PREFIX)
+
 app.include_router(location.router,prefix=API_PREFIX)
+app.include_router(fleet_mobile.router)
+app.include_router(fleet_admin.router, prefix="/api/v1/int/fleet")
+
 
 
 @app.get("/", tags=["Health"])

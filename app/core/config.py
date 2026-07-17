@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./franchise.db"
     
     # here Geocoding api key
-    HERE_API_KEY :str
+    HERE_API_KEY: str = ""
     
     # JWT
     SECRET_KEY: str = secrets.token_urlsafe(32)
