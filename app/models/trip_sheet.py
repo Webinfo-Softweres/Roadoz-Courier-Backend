@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, JSON, Integer, text
+from sqlalchemy import DateTime, ForeignKey, Numeric, String, JSON, Integer, text, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -17,6 +17,10 @@ class TripSheet(Base):
     warehouse_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("warehouse_addresses.id", ondelete="SET NULL"), nullable=True, index=True)
     
     # Destination & Routing
+    is_local: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
+    route: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    destination: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    
     destination_franchise_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("franchises.id", ondelete="SET NULL"), nullable=True, index=True)
     route_franchise_ids: Mapped[dict | None] = mapped_column(JSON, nullable=True) # store as JSON list
     

@@ -268,10 +268,13 @@ class PodOut(BaseModel):
 
 class TripSheetRequest(BaseModel):
     barcodes: List[str] = Field(..., min_length=1)
-    destination_franchise_id: str
-    route_franchise_ids: List[str] = []
+    destination_franchise_id: Optional[str] = None
+    route_franchise_ids: Optional[List[str]] = []
     driver_id: Optional[str] = None
     vehicle_id: Optional[str] = None
+    is_local: bool = False
+    route: Optional[List[str]] = []
+    destination: Optional[str] = None
 
 class TripSheetItem(BaseModel):
     sl_no: int
@@ -283,10 +286,13 @@ class TripSheetItem(BaseModel):
 
 class TripSheetResponse(BaseModel):
     id: str
-    destination_franchise_id: str
-    route_franchise_ids: List[str]
+    destination_franchise_id: Optional[str] = None
+    route_franchise_ids: Optional[List[str]] = []
     driver_id: Optional[str] = None
     vehicle_id: Optional[str] = None
+    is_local: bool = False
+    route: Optional[List[str]] = []
+    destination: Optional[str] = None
     items: List[TripSheetItem]
     topay_freight: float
     topay_packages: int
@@ -411,6 +417,9 @@ class TripSheetDetailOut(BaseModel):
     route_franchise_ids: Optional[List[str]]
     driver_id: Optional[str]
     vehicle_id: Optional[str]
+    is_local: bool
+    route: Optional[List[str]]
+    destination: Optional[str]
 
     topay_freight: float
     topay_packages: int

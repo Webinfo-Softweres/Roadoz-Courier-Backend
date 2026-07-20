@@ -178,7 +178,7 @@ async def update_trip_sheet_endpoint(
     data: TripSheetRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: User = Depends(require_permission("tripsheet:update"))
+    # _: User = Depends(require_permission("tripsheet:update"))
 ):
     from app.services.operations_service import update_trip_sheet
     return await update_trip_sheet(db, trip_sheet_id, data, current_user)

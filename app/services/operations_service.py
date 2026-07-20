@@ -322,6 +322,9 @@ async def generate_trip_sheet(db: AsyncSession, data: "TripSheetRequest", curren
         warehouse_id=warehouse_id,
         destination_franchise_id=data.destination_franchise_id,
         route_franchise_ids=data.route_franchise_ids,
+        is_local=data.is_local,
+        route=data.route,
+        destination=data.destination,
         driver_id=data.driver_id,
         vehicle_id=data.vehicle_id,
         topay_freight=topay_freight,
@@ -345,6 +348,9 @@ async def generate_trip_sheet(db: AsyncSession, data: "TripSheetRequest", curren
         id=trip_sheet.id,
         destination_franchise_id=data.destination_franchise_id,
         route_franchise_ids=data.route_franchise_ids,
+        is_local=data.is_local,
+        route=data.route,
+        destination=data.destination,
         driver_id=data.driver_id,
         vehicle_id=data.vehicle_id,
         items=items,
@@ -354,6 +360,7 @@ async def generate_trip_sheet(db: AsyncSession, data: "TripSheetRequest", curren
         credit_packages=credit_packages,
         cod_freight=cod_freight,
         cod_packages=cod_packages,
+        prepaid_freight=prepaid_freight,
         prepaid_packages=prepaid_packages,
         total_freight=total_freight,
         total_packages=total_packages
@@ -454,6 +461,9 @@ async def update_trip_sheet(db: AsyncSession, trip_sheet_id: str, data: "TripShe
 
     trip_sheet.destination_franchise_id = data.destination_franchise_id
     trip_sheet.route_franchise_ids = data.route_franchise_ids
+    trip_sheet.is_local = data.is_local
+    trip_sheet.route = data.route
+    trip_sheet.destination = data.destination
     trip_sheet.driver_id = data.driver_id
     trip_sheet.vehicle_id = data.vehicle_id
     trip_sheet.topay_freight = topay_freight
@@ -474,6 +484,9 @@ async def update_trip_sheet(db: AsyncSession, trip_sheet_id: str, data: "TripShe
         id=trip_sheet.id,
         destination_franchise_id=data.destination_franchise_id,
         route_franchise_ids=data.route_franchise_ids,
+        is_local=data.is_local,
+        route=data.route,
+        destination=data.destination,
         driver_id=data.driver_id,
         vehicle_id=data.vehicle_id,
         items=items,
@@ -678,6 +691,9 @@ async def get_trip_sheet_by_id(db: AsyncSession, current_user: User, trip_sheet_
         warehouse_id=trip_sheet.warehouse_id,
         destination_franchise_id=trip_sheet.destination_franchise_id,
         route_franchise_ids=trip_sheet.route_franchise_ids,
+        is_local=trip_sheet.is_local,
+        route=trip_sheet.route,
+        destination=trip_sheet.destination,
         driver_id=trip_sheet.driver_id,
         vehicle_id=trip_sheet.vehicle_id,
         topay_freight=float(trip_sheet.topay_freight),
