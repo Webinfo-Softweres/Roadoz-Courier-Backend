@@ -158,6 +158,11 @@ DEFAULT_PERMISSIONS = [
     ("tripsheet", "view", "View trip sheets"),
     ("tripsheet", "update", "Update trip sheets"),
     ("tripsheet", "delete", "Delete trip sheets"),
+
+    # Fleet drivers
+    ("fleet", "drivers:view", "View driver onboarding queue"),
+    ("fleet", "drivers:approve", "Approve or reject driver applications"),
+
 ]
 
 
@@ -454,6 +459,8 @@ app.include_router(label.router,prefix=API_PREFIX)
 app.include_router(user_franchise.router,prefix=API_PREFIX)
 app.include_router(consigeeuserorder.router,prefix=API_PREFIX)
 app.include_router(month_end_closing.router,prefix=API_PREFIX)
+app.include_router(fleet_mobile.router)
+app.include_router(fleet_admin.router, prefix="/api/v1/int/fleet")
 
 app.include_router(location.router,prefix=API_PREFIX)
 app.include_router(fleet_mobile.router)
