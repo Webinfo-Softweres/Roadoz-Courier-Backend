@@ -3,7 +3,7 @@ import uuid
 from datetime import date
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select,delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.franchise import Franchise
@@ -230,3 +230,472 @@ async def get_pod_by_order(db: AsyncSession, order_id: str, current_user: User) 
         raise HTTPException(status_code=404, detail="POD not found")
     await _scope_franchise_id(db, current_user, pod.order.franchise_id)
     return PodOut.model_validate(pod)
+
+
+async def generate_trip_sheet(db: AsyncSession, data: "TripSheetRequest", current_user: User):
+    from app.schemas.operations import TripSheetResponse, TripSheetItem
+    from app.models.trip_sheet import TripSheet, TripSheetOrder
+    import uuid
+    
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+
+    # Build order query scoped to the current user's franchise/warehouse
+    order_filters = [Order.order_number.in_(data.barcodes)]
+    if franchise_id:
+        order_filters.append(Order.franchise_id == franchise_id)
+    elif warehouse_id:
+        order_filters.append(Order.warehouse_id == warehouse_id)
+
+    orders = (await db.execute(select(Order).where(and_(*order_filters)))).scalars().all()
+    if not orders:
+        raise HTTPException(status_code=404, detail="No orders found for given barcodes under your franchise/warehouse")
+
+    # Detect any barcodes that were requested but not returned (out-of-scope or not found)
+    found_numbers = {o.order_number for o in orders}
+    missing = [b for b in data.barcodes if b not in found_numbers]
+    if missing:
+        raise HTTPException(
+            status_code=403,
+            detail=f"The following orders are not under your franchise/warehouse or do not exist: {missing}"
+        )
+
+
+    items = []
+    topay_freight = 0.0
+    topay_packages = 0
+    credit_freight = 0.0
+    credit_packages = 0
+    cod_freight = 0.0
+    cod_packages = 0
+    prepaid_freight = 0.0
+    prepaid_packages = 0
+    total_freight = 0.0
+    total_packages = 0
+    
+    trip_sheet_id = str(uuid.uuid4())
+    trip_sheet_orders = []
+    
+    for idx, order in enumerate(orders, start=1):
+        freight = float(order.total_freight or 0)
+        boxes = int(order.total_boxes or 0)
+        if boxes == 0:
+            boxes = 1
+            
+        payment = str(order.payment_method).lower().replace(" ", "")
+        if payment == "topay":
+            topay_freight += freight
+            topay_packages += boxes
+        elif payment == "credit":
+            credit_freight += freight
+            credit_packages += boxes
+        elif payment == "cod":
+            cod_freight += freight
+            cod_packages += boxes
+        elif payment == "prepaid":
+            prepaid_freight += freight
+            prepaid_packages += boxes
+            
+        total_freight += freight
+        total_packages += boxes
+        
+        items.append(TripSheetItem(
+            sl_no=idx,
+            order_id=order.id,
+            order_number=order.order_number,
+            payment_method=order.payment_method,
+            total_freight=freight,
+            total_boxes=boxes
+        ))
+        
+        trip_sheet_orders.append(
+            TripSheetOrder(
+                trip_sheet_id=trip_sheet_id,
+                order_id=order.id,
+                sl_no=idx
+            )
+        )
+        
+    trip_sheet = TripSheet(
+        id=trip_sheet_id,
+        franchise_id=franchise_id,
+        warehouse_id=warehouse_id,
+        destination_franchise_id=data.destination_franchise_id,
+        route_franchise_ids=data.route_franchise_ids,
+        driver_id=data.driver_id,
+        vehicle_id=data.vehicle_id,
+        topay_freight=topay_freight,
+        topay_packages=topay_packages,
+        credit_freight=credit_freight,
+        credit_packages=credit_packages,
+        cod_freight=cod_freight,
+        cod_packages=cod_packages,
+        prepaid_freight=prepaid_freight,
+        prepaid_packages=prepaid_packages,
+        total_freight=total_freight,
+        total_packages=total_packages,
+        created_by=current_user.id
+    )
+    
+    db.add(trip_sheet)
+    db.add_all(trip_sheet_orders)
+    await db.flush()
+    
+    return TripSheetResponse(
+        id=trip_sheet.id,
+        destination_franchise_id=data.destination_franchise_id,
+        route_franchise_ids=data.route_franchise_ids,
+        driver_id=data.driver_id,
+        vehicle_id=data.vehicle_id,
+        items=items,
+        topay_freight=topay_freight,
+        topay_packages=topay_packages,
+        credit_freight=credit_freight,
+        credit_packages=credit_packages,
+        cod_freight=cod_freight,
+        cod_packages=cod_packages,
+        prepaid_packages=prepaid_packages,
+        total_freight=total_freight,
+        total_packages=total_packages
+    )
+
+async def update_trip_sheet(db: AsyncSession, trip_sheet_id: str, data: "TripSheetRequest", current_user: User):
+    from app.schemas.operations import TripSheetResponse, TripSheetItem
+    from app.models.trip_sheet import TripSheet, TripSheetOrder
+    
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+
+    filters = [TripSheet.id == trip_sheet_id]
+    if franchise_id:
+        filters.append(TripSheet.franchise_id == franchise_id)
+    elif warehouse_id:
+        filters.append(TripSheet.warehouse_id == warehouse_id)
+
+    query = select(TripSheet).where(and_(*filters))
+    trip_sheet = (await db.execute(query)).scalar_one_or_none()
+    if not trip_sheet:
+        raise HTTPException(status_code=404, detail="Trip sheet not found")
+
+    order_filters = [Order.order_number.in_(data.barcodes)]
+    if franchise_id:
+        order_filters.append(Order.franchise_id == franchise_id)
+    elif warehouse_id:
+        order_filters.append(Order.warehouse_id == warehouse_id)
+
+    orders = (await db.execute(select(Order).where(and_(*order_filters)))).scalars().all()
+    if not orders:
+        raise HTTPException(status_code=404, detail="No orders found for given barcodes under your franchise/warehouse")
+
+    found_numbers = {o.order_number for o in orders}
+    missing = [b for b in data.barcodes if b not in found_numbers]
+    if missing:
+        raise HTTPException(
+            status_code=403,
+            detail=f"The following orders are not under your franchise/warehouse or do not exist: {missing}"
+        )
+
+    # Delete old orders manually if cascade delete-orphan relies on modifying the collection
+    await db.execute(delete(TripSheetOrder).where(TripSheetOrder.trip_sheet_id == trip_sheet_id))
+
+    items = []
+    topay_freight = 0.0
+    topay_packages = 0
+    credit_freight = 0.0
+    credit_packages = 0
+    cod_freight = 0.0
+    cod_packages = 0
+    prepaid_freight = 0.0
+    prepaid_packages = 0
+    total_freight = 0.0
+    total_packages = 0
+    
+    trip_sheet_orders = []
+    
+    for idx, order in enumerate(orders, start=1):
+        freight = float(order.total_freight or 0)
+        boxes = int(order.total_boxes or 0)
+        if boxes == 0:
+            boxes = 1
+            
+        payment = str(order.payment_method).lower().replace(" ", "")
+        if payment == "topay":
+            topay_freight += freight
+            topay_packages += boxes
+        elif payment == "credit":
+            credit_freight += freight
+            credit_packages += boxes
+        elif payment == "cod":
+            cod_freight += freight
+            cod_packages += boxes
+        elif payment == "prepaid":
+            prepaid_freight += freight
+            prepaid_packages += boxes
+            
+        total_freight += freight
+        total_packages += boxes
+        
+        items.append(TripSheetItem(
+            sl_no=idx,
+            order_id=order.id,
+            order_number=order.order_number,
+            payment_method=order.payment_method,
+            total_freight=freight,
+            total_boxes=boxes
+        ))
+        
+        trip_sheet_orders.append(
+            TripSheetOrder(
+                trip_sheet_id=trip_sheet_id,
+                order_id=order.id,
+                sl_no=idx
+            )
+        )
+
+    trip_sheet.destination_franchise_id = data.destination_franchise_id
+    trip_sheet.route_franchise_ids = data.route_franchise_ids
+    trip_sheet.driver_id = data.driver_id
+    trip_sheet.vehicle_id = data.vehicle_id
+    trip_sheet.topay_freight = topay_freight
+    trip_sheet.topay_packages = topay_packages
+    trip_sheet.credit_freight = credit_freight
+    trip_sheet.credit_packages = credit_packages
+    trip_sheet.cod_freight = cod_freight
+    trip_sheet.cod_packages = cod_packages
+    trip_sheet.prepaid_freight = prepaid_freight
+    trip_sheet.prepaid_packages = prepaid_packages
+    trip_sheet.total_freight = total_freight
+    trip_sheet.total_packages = total_packages
+    
+    db.add_all(trip_sheet_orders)
+    await db.flush()
+
+    return TripSheetResponse(
+        id=trip_sheet.id,
+        destination_franchise_id=data.destination_franchise_id,
+        route_franchise_ids=data.route_franchise_ids,
+        driver_id=data.driver_id,
+        vehicle_id=data.vehicle_id,
+        items=items,
+        topay_freight=topay_freight,
+        topay_packages=topay_packages,
+        credit_freight=credit_freight,
+        credit_packages=credit_packages,
+        cod_freight=cod_freight,
+        cod_packages=cod_packages,
+        prepaid_freight=prepaid_freight,
+        prepaid_packages=prepaid_packages,
+        total_freight=total_freight,
+        total_packages=total_packages
+    )
+
+async def delete_trip_sheet(db: AsyncSession, trip_sheet_id: str, current_user: User):
+    from app.models.trip_sheet import TripSheet
+    
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+
+    filters = [TripSheet.id == trip_sheet_id]
+    if franchise_id:
+        filters.append(TripSheet.franchise_id == franchise_id)
+    elif warehouse_id:
+        filters.append(TripSheet.warehouse_id == warehouse_id)
+
+    query = select(TripSheet).where(and_(*filters))
+    trip_sheet = (await db.execute(query)).scalar_one_or_none()
+    if not trip_sheet:
+        raise HTTPException(status_code=404, detail="Trip sheet not found")
+        
+    await db.delete(trip_sheet)
+    await db.commit()
+
+async def get_trip_sheet_drivers(db: AsyncSession, current_user: User):
+    from app.modules.fleet.models.driver import Driver
+    from app.schemas.operations import TripSheetDriverOut
+    
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+    
+    filters = []
+    # If franchise_id or warehouse_id is required for Drivers (fleet is typically franchise-based)
+    if franchise_id:
+        filters.append(Driver.franchise_id == franchise_id)
+    # No explicit warehouse_id for fleet models usually, but they might be assigned to a franchise
+    
+    query = select(Driver)
+    if filters:
+        query = query.where(and_(*filters))
+        
+    drivers = (await db.execute(query)).scalars().all()
+    return [TripSheetDriverOut.model_validate(d) for d in drivers]
+
+
+async def get_trip_sheet_vehicles(db: AsyncSession, current_user: User):
+    from app.modules.fleet.models.vehicle import Vehicle
+    from app.schemas.operations import TripSheetVehicleOut
+    
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    
+    filters = []
+    if franchise_id:
+        filters.append(Vehicle.franchise_id == franchise_id)
+        
+    query = select(Vehicle)
+    if filters:
+        query = query.where(and_(*filters))
+        
+    vehicles = (await db.execute(query)).scalars().all()
+    return [TripSheetVehicleOut.model_validate(v) for v in vehicles]
+
+
+async def get_trip_sheet_franchises(db: AsyncSession, current_user: User):
+    from app.models.franchise import Franchise
+    from app.schemas.operations import TripSheetFranchiseOut
+    
+    # We should return all franchises to allow choosing a destination
+    query = select(Franchise)
+    franchises = (await db.execute(query)).scalars().all()
+    
+    return [TripSheetFranchiseOut.model_validate(f) for f in franchises]
+
+async def list_trip_sheets(
+    db: AsyncSession, 
+    current_user: User, 
+    page: int, 
+    limit: int
+) -> dict:
+    from app.models.trip_sheet import TripSheet
+    from app.schemas.operations import TripSheetListOut
+    import math
+    
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+    
+    filters = []
+    if franchise_id:
+        filters.append(TripSheet.franchise_id == franchise_id)
+    elif warehouse_id:
+        filters.append(TripSheet.warehouse_id == warehouse_id)
+        
+    total_query = select(func.count()).select_from(TripSheet)
+    if filters:
+        total_query = total_query.where(and_(*filters))
+    total = (await db.execute(total_query)).scalar_one()
+    
+    query = select(TripSheet)
+    if filters:
+        query = query.where(and_(*filters))
+    query = query.order_by(TripSheet.created_at.desc()).offset((page - 1) * limit).limit(limit)
+    
+    rows = (await db.execute(query)).scalars().all()
+    
+    return {
+        "items": [TripSheetListOut.model_validate(row) for row in rows],
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "pages": math.ceil(total / limit) if total else 0
+    }
+
+async def get_trip_sheet_by_id(db: AsyncSession, current_user: User, trip_sheet_id: str):
+    from app.models.trip_sheet import TripSheet
+    from app.models.franchise import Franchise
+    from app.models.order import Order
+    from app.schemas.operations import (
+        TripSheetDetailOut, TripSheetOrderDetailOut,
+        TripSheetPickupAddressOut, TripSheetConsigneeOut,
+        TripSheetFranchiseOut, TripSheetDriverOut, TripSheetVehicleOut,
+        TripSheetRouteFranchiseOut
+    )
+
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+
+    filters = [TripSheet.id == trip_sheet_id]
+    if franchise_id:
+        filters.append(TripSheet.franchise_id == franchise_id)
+    elif warehouse_id:
+        filters.append(TripSheet.warehouse_id == warehouse_id)
+
+    query = select(TripSheet).where(and_(*filters))
+    trip_sheet = (await db.execute(query)).scalar_one_or_none()
+
+    if not trip_sheet:
+        raise HTTPException(status_code=404, detail="Trip sheet not found")
+
+    # Load full route franchises with seq_no
+    route_franchises = []
+    if trip_sheet.route_franchise_ids:
+        fids = trip_sheet.route_franchise_ids
+        f_rows = (await db.execute(select(Franchise).where(Franchise.id.in_(fids)))).scalars().all()
+        f_map = {f.id: f for f in f_rows}
+        route_franchises = [
+            TripSheetRouteFranchiseOut(
+                seq_no=idx,
+                id=f_map[fid].id,
+                name=f_map[fid].name,
+                franchise_code=f_map[fid].franchise_code,
+                email=f_map[fid].email,
+                phone=f_map[fid].phone,
+                latitude=f_map[fid].latitude,
+                longitude=f_map[fid].longitude,
+                proposed_location=f_map[fid].proposed_location,
+                permanent_address=f_map[fid].permanent_address,
+                date_of_birth=f_map[fid].date_of_birth,
+                
+            )
+            for idx, fid in enumerate(fids, start=1) if fid in f_map
+        ]
+
+
+    # Build enriched order items
+    order_details = []
+    for trip_order in trip_sheet.orders:
+        order: Order = trip_order.order
+        pickup = None
+        consignee = None
+        if order:
+            if order.pickup_address:
+                pickup = TripSheetPickupAddressOut.model_validate(order.pickup_address)
+            if order.consignee:
+                consignee = TripSheetConsigneeOut.model_validate(order.consignee)
+
+        order_details.append(TripSheetOrderDetailOut(
+            id=trip_order.id,
+            order_id=trip_order.order_id,
+            sl_no=trip_order.sl_no,
+            order_number=order.order_number if order else None,
+            payment_method=order.payment_method if order else None,
+            total_freight=float(order.total_freight) if order else None,
+            total_boxes=order.total_boxes if order else None,
+            pickup_address=pickup,
+            consignee=consignee,
+        ))
+
+    return TripSheetDetailOut(
+        id=trip_sheet.id,
+        franchise_id=trip_sheet.franchise_id,
+        warehouse_id=trip_sheet.warehouse_id,
+        destination_franchise_id=trip_sheet.destination_franchise_id,
+        route_franchise_ids=trip_sheet.route_franchise_ids,
+        driver_id=trip_sheet.driver_id,
+        vehicle_id=trip_sheet.vehicle_id,
+        topay_freight=float(trip_sheet.topay_freight),
+        topay_packages=trip_sheet.topay_packages,
+        credit_freight=float(trip_sheet.credit_freight),
+        credit_packages=trip_sheet.credit_packages,
+        cod_freight=float(trip_sheet.cod_freight),
+        cod_packages=trip_sheet.cod_packages,
+        prepaid_freight=float(trip_sheet.prepaid_freight),
+        prepaid_packages=trip_sheet.prepaid_packages,
+        total_freight=float(trip_sheet.total_freight),
+        total_packages=trip_sheet.total_packages,
+        created_at=trip_sheet.created_at,
+        driver=TripSheetDriverOut.model_validate(trip_sheet.driver) if trip_sheet.driver else None,
+        vehicle=TripSheetVehicleOut.model_validate(trip_sheet.vehicle) if trip_sheet.vehicle else None,
+        destination_franchise=TripSheetFranchiseOut.model_validate(trip_sheet.destination_franchise) if trip_sheet.destination_franchise else None,
+        franchise=TripSheetFranchiseOut.model_validate(trip_sheet.franchise) if trip_sheet.franchise else None,
+        route_franchises=route_franchises,
+        orders=order_details,
+    )
+

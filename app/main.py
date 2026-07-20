@@ -152,7 +152,12 @@ DEFAULT_PERMISSIONS = [
     # Fleet drivers
     ("fleet", "drivers:view", "View driver onboarding queue"),
     ("fleet", "drivers:approve", "Approve or reject driver applications"),
-
+    
+    # Trip Sheets
+    ("tripsheet", "create", "Create trip sheets"),
+    ("tripsheet", "view", "View trip sheets"),
+    ("tripsheet", "update", "Update trip sheets"),
+    ("tripsheet", "delete", "Delete trip sheets"),
 ]
 
 
