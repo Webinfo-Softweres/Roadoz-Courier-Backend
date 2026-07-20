@@ -1,7 +1,7 @@
 import math
 import uuid
 from datetime import date
-
+from typing import Optional
 from fastapi import HTTPException, status
 from sqlalchemy import and_, func, select,delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -522,19 +522,23 @@ async def delete_trip_sheet(db: AsyncSession, trip_sheet_id: str, current_user: 
     await db.delete(trip_sheet)
     await db.commit()
 
-async def get_trip_sheet_drivers(db: AsyncSession, current_user: User):
+async def get_trip_sheet_drivers(db: AsyncSession, current_user: User, name: Optional[str] = None, phone: Optional[str] = None):
     from app.modules.fleet.models.driver import Driver
     from app.schemas.operations import TripSheetDriverOut
+    from sqlalchemy import or_
     
     franchise_id = await _resolve_franchise_id(db, current_user)
     warehouse_id = await _resolve_warehouse_id(db, current_user)
     
     filters = []
-    # If franchise_id or warehouse_id is required for Drivers (fleet is typically franchise-based)
     if franchise_id:
         filters.append(Driver.franchise_id == franchise_id)
-    # No explicit warehouse_id for fleet models usually, but they might be assigned to a franchise
     
+    if name:
+        filters.append(or_(Driver.first_name.ilike(f"%{name}%"), Driver.last_name.ilike(f"%{name}%")))
+    if phone:
+        filters.append(Driver.phone.ilike(f"%{phone}%"))
+        
     query = select(Driver)
     if filters:
         query = query.where(and_(*filters))
@@ -543,7 +547,7 @@ async def get_trip_sheet_drivers(db: AsyncSession, current_user: User):
     return [TripSheetDriverOut.model_validate(d) for d in drivers]
 
 
-async def get_trip_sheet_vehicles(db: AsyncSession, current_user: User):
+async def get_trip_sheet_vehicles(db: AsyncSession, current_user: User, plate_number: Optional[str] = None, model: Optional[str] = None):
     from app.modules.fleet.models.vehicle import Vehicle
     from app.schemas.operations import TripSheetVehicleOut
     
@@ -553,6 +557,11 @@ async def get_trip_sheet_vehicles(db: AsyncSession, current_user: User):
     if franchise_id:
         filters.append(Vehicle.franchise_id == franchise_id)
         
+    if plate_number:
+        filters.append(Vehicle.plate_number.ilike(f"%{plate_number}%"))
+    if model:
+        filters.append(Vehicle.model.ilike(f"%{model}%"))
+        
     query = select(Vehicle)
     if filters:
         query = query.where(and_(*filters))
@@ -561,15 +570,59 @@ async def get_trip_sheet_vehicles(db: AsyncSession, current_user: User):
     return [TripSheetVehicleOut.model_validate(v) for v in vehicles]
 
 
-async def get_trip_sheet_franchises(db: AsyncSession, current_user: User):
+async def get_trip_sheet_franchises(db: AsyncSession, current_user: User, name: Optional[str] = None, pincode: Optional[str] = None, permanent_address: Optional[str] = None):
     from app.models.franchise import Franchise
     from app.schemas.operations import TripSheetFranchiseOut
     
+    filters = []
+    if name:
+        filters.append(Franchise.name.ilike(f"%{name}%"))
+    if pincode:
+        filters.append(Franchise.pincode.ilike(f"%{pincode}%"))
+    if permanent_address:
+        filters.append(Franchise.permanent_address.ilike(f"%{permanent_address}%"))
+    
     # We should return all franchises to allow choosing a destination
     query = select(Franchise)
+    if filters:
+        query = query.where(and_(*filters))
+        
     franchises = (await db.execute(query)).scalars().all()
     
     return [TripSheetFranchiseOut.model_validate(f) for f in franchises]
+
+async def scan_order_for_trip_sheet(db: AsyncSession, current_user: User, barcode: str):
+    from app.models.order import Order
+    from app.schemas.order import OrderOut
+    from sqlalchemy.orm import selectinload
+    
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+    
+    filters = [Order.order_number == barcode]
+    if franchise_id:
+        filters.append(Order.franchise_id == franchise_id)
+    elif warehouse_id:
+        filters.append(Order.warehouse_id == warehouse_id)
+        
+    query = (
+        select(Order)
+        .options(
+            selectinload(Order.pickup_address),
+            selectinload(Order.consignee),
+            selectinload(Order.items),
+            selectinload(Order.packages),
+            selectinload(Order.franchise),
+            selectinload(Order.creator)
+        )
+        .where(and_(*filters))
+    )
+    order = (await db.execute(query)).scalar_one_or_none()
+    
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found or does not belong to your franchise/warehouse")
+        
+    return OrderOut.model_validate(order)
 
 async def list_trip_sheets(
     db: AsyncSession, 
