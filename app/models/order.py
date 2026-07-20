@@ -115,6 +115,15 @@ class Order(Base):
     is_gst_exempt: Mapped[bool] = mapped_column(default=False, server_default=text("0"))
     manual_freight_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
+    @property
+    def weight_summary(self):
+        return {
+            "total_weight_kg": float(self.total_weight_kg or 0),
+            "total_vol_weight_kg": float(self.total_vol_weight_kg or 0),
+            "applicable_weight_kg": float(self.applicable_weight_kg or 0),
+            "total_boxes": self.total_boxes or 0
+        }
+
     @hybrid_property
     def shipping_charge(self):
         return self.total_freight

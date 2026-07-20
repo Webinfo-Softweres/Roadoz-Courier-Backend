@@ -1,5 +1,5 @@
 from datetime import date
-
+from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -126,30 +126,47 @@ async def generate_trip_sheet_endpoint(
 
 @router.get("/trip-sheet/drivers")
 async def get_trip_sheet_drivers_endpoint(
+    name: Optional[str] = Query(None),
+    phone: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: User = Depends(require_permission("tripsheet:create"))
 ):
     from app.services.operations_service import get_trip_sheet_drivers
-    return await get_trip_sheet_drivers(db, current_user)
+    return await get_trip_sheet_drivers(db, current_user, name, phone)
 
 @router.get("/trip-sheet/vehicles")
 async def get_trip_sheet_vehicles_endpoint(
+    plate_number: Optional[str] = Query(None),
+    model: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: User = Depends(require_permission("tripsheet:create"))
 ):
     from app.services.operations_service import get_trip_sheet_vehicles
-    return await get_trip_sheet_vehicles(db, current_user)
+    return await get_trip_sheet_vehicles(db, current_user, plate_number, model)
 
 @router.get("/trip-sheet/franchises")
 async def get_trip_sheet_franchises_endpoint(
+    name: Optional[str] = Query(None),
+    pincode: Optional[str] = Query(None),
+    permanent_address: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: User = Depends(require_permission("tripsheet:create"))
 ):
     from app.services.operations_service import get_trip_sheet_franchises
-    return await get_trip_sheet_franchises(db, current_user)
+    return await get_trip_sheet_franchises(db, current_user, name, pincode, permanent_address)
+
+@router.get("/trip-sheet/scan/{barcode}")
+async def scan_order_for_trip_sheet_endpoint(
+    barcode: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("tripsheet:create"))
+):
+    from app.services.operations_service import scan_order_for_trip_sheet
+    return await scan_order_for_trip_sheet(db, current_user, barcode)
 
 @router.get("/trip-sheet")
 async def list_trip_sheets_endpoint(
@@ -178,7 +195,7 @@ async def update_trip_sheet_endpoint(
     data: TripSheetRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    # _: User = Depends(require_permission("tripsheet:update"))
+    _: User = Depends(require_permission("tripsheet:update"))
 ):
     from app.services.operations_service import update_trip_sheet
     return await update_trip_sheet(db, trip_sheet_id, data, current_user)
