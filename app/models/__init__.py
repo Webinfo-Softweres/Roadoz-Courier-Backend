@@ -31,3 +31,4 @@ from app.models import user_role
 from app.models import warehouse
 from app.models import webconfiguration
 from app.models import month_end_closing
+from app.models.trip_sheet import TripSheet, TripSheetOrder

@@ -10,6 +10,8 @@ from app.models.order import (Order,OrderItem,OrderPackage,BagOrder,ConsigneeToD
 from app.models.notification import Notification
 from app.models.invoice import InvoiceOrder
 
+from app.core.config import settings
+from app.services.location_service import get_coordinates_from_address
 from app.core.database import get_db
 from app.dependencies.role_checker import get_current_user, require_permission, get_user_permissions
 from fastapi import HTTPException, status
@@ -379,6 +381,9 @@ async def create_pickup_address(
 ) -> PickupAddressOut:
     franchise_id = await _resolve_franchise_id(db, current_user)
 
+    address_str = f"{data.address_line_1}, {data.city}, {data.state} {data.pincode}, {data.country}"
+    coords = await get_coordinates_from_address(address_str)
+
     addr = PickupAddress(
         id=str(uuid.uuid4()),
         user_id=current_user.id,
@@ -395,6 +400,8 @@ async def create_pickup_address(
         country=data.country,
         active=data.active,
         is_primary=data.is_primary,
+        latitude=coords["lat"] if coords else None,
+        longitude=coords["lng"] if coords else None,
     )
     db.add(addr)
     await db.flush()
@@ -584,6 +591,9 @@ async def create_consignee(
 ) -> ConsigneeOut:
     franchise_id = await _resolve_franchise_id(db, current_user)
 
+    address_str = f"{data.address_line_1}, {data.city}, {data.state} {data.pincode}"
+    coords = await get_coordinates_from_address(address_str)
+
     consignee = Consignee(
         id=str(uuid.uuid4()),
         user_id=current_user.id,
@@ -597,6 +607,8 @@ async def create_consignee(
         pincode=data.pincode,
         city=data.city,
         state=data.state,
+        latitude=coords["lat"] if coords else None,
+        longitude=coords["lng"] if coords else None,
     )
     db.add(consignee)
     await db.flush()

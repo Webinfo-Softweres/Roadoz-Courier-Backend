@@ -15,7 +15,7 @@ from app.middleware.auth_middleware import RequestLoggingMiddleware, SecurityHea
 from app.routes import auth, franchise, orderreview,projectreview , profile, websocket, rbac, order, remittance, invoice,warehouse
 from app.middleware.auth_middleware import RequestLoggingMiddleware, SecurityHeadersMiddleware, ActivityLoggingMiddleware
 from app.routes import auth, franchise, profile, websocket, rbac, order, remittance, invoice,warehouse, activity_log,consigeeauth,coningeereview,webconfiguration,notification
-from app.routes import auth, franchise, profile, websocket, rbac, order, remittance, invoice,warehouse, activity_log,consigeeauth,coningeereview,webconfiguration, analytics,user_admincommunication, rate_calculator, reports, prints, operations
+from app.routes import auth, franchise, profile, websocket, rbac, order, remittance, invoice,warehouse, activity_log,consigeeauth,coningeereview,webconfiguration, analytics,user_admincommunication, rate_calculator, reports, prints, operations, location
 from app.routes import bulk_order, bag,label,user_franchise,consigeeuserorder, month_end_closing
 from app.modules.fleet.routes import mobile as fleet_mobile
 from app.modules.fleet.routes import admin as fleet_admin
@@ -147,9 +147,22 @@ DEFAULT_PERMISSIONS = [
     ("month_end_closing", "submit", "Submit month end closing payments"),
     ("month_end_closing", "view", "View month end closing records"),
     ("month_end_closing", "approve", "Approve month end closing payments"),
+
+    ("reset", "location", "Reset warehouse or franchise location"),
     # Fleet drivers
     ("fleet", "drivers:view", "View driver onboarding queue"),
     ("fleet", "drivers:approve", "Approve or reject driver applications"),
+    
+    # Trip Sheets
+    ("tripsheet", "create", "Create trip sheets"),
+    ("tripsheet", "view", "View trip sheets"),
+    ("tripsheet", "update", "Update trip sheets"),
+    ("tripsheet", "delete", "Delete trip sheets"),
+
+    # Fleet drivers
+    ("fleet", "drivers:view", "View driver onboarding queue"),
+    ("fleet", "drivers:approve", "Approve or reject driver applications"),
+
 ]
 
 
@@ -448,6 +461,11 @@ app.include_router(consigeeuserorder.router,prefix=API_PREFIX)
 app.include_router(month_end_closing.router,prefix=API_PREFIX)
 app.include_router(fleet_mobile.router)
 app.include_router(fleet_admin.router, prefix="/api/v1/int/fleet")
+
+app.include_router(location.router,prefix=API_PREFIX)
+app.include_router(fleet_mobile.router)
+app.include_router(fleet_admin.router, prefix="/api/v1/int/fleet")
+
 
 
 @app.get("/", tags=["Health"])

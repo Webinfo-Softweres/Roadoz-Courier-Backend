@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, ForeignKey, text
+from sqlalchemy import String, DateTime, ForeignKey, text, DECIMAL
 from sqlalchemy.orm import Mapped, mapped_column,relationship
 from app.core.database import Base
 
@@ -27,6 +27,9 @@ class WareHouseAddress(Base):
     city: Mapped[str] = mapped_column(String(100), nullable=False)
     state: Mapped[str] = mapped_column(String(100), nullable=False)
     country: Mapped[str] = mapped_column(String(100), nullable=False, server_default=text("'India'"))
+
+    latitude: Mapped[float | None] = mapped_column(DECIMAL(18, 8), nullable=True)
+    longitude: Mapped[float | None] = mapped_column(DECIMAL(18, 8), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
