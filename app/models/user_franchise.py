@@ -88,7 +88,12 @@ class FranchiseApplicationbyUser(Base):
     
     # Meta
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+        onupdate=datetime.utcnow,
+    )
     
     # Relationships
     approver = relationship("User", foreign_keys=[approved_by])

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, DateTime, ForeignKey, text
+from sqlalchemy import String, DateTime, ForeignKey, text, DECIMAL
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -30,6 +30,9 @@ class Consignee(Base):
     state: Mapped[str] = mapped_column(String(100), nullable=False)
 
     status: Mapped[str] = mapped_column(String(10), nullable=False, server_default=text("'active'"))
+
+    latitude: Mapped[float | None] = mapped_column(DECIMAL(18, 8), nullable=True)
+    longitude: Mapped[float | None] = mapped_column(DECIMAL(18, 8), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")

@@ -1,12 +1,19 @@
 from datetime import date
-
+from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.dependencies.role_checker import get_current_user, require_permission
 from app.models.user import User
-from app.schemas.operations import AttendanceCreate, CashVoucherCreate, ExpenseCreate, ManifestCreate, PodCreate
+from app.schemas.operations import (
+    AttendanceCreate,
+    CashVoucherCreate,
+    ExpenseCreate,
+    ManifestCreate,
+    PodCreate,
+    TripSheetRequest,
+)
 from app.services.operations_service import (
     create_attendance,
     create_cash_voucher,
@@ -105,3 +112,112 @@ async def create_pod_endpoint(data: PodCreate, db: AsyncSession = Depends(get_db
 @router.get("/pods/order/{order_id}")
 async def get_pod_by_order_endpoint(order_id: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user), _: User = Depends(require_permission("orders:view"))):
     return await get_pod_by_order(db, order_id, current_user)
+
+
+@router.post("/trip-sheet", status_code=200)
+async def generate_trip_sheet_endpoint(
+    data: TripSheetRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("tripsheet:create"))
+):
+    from app.services.operations_service import generate_trip_sheet
+    return await generate_trip_sheet(db, data, current_user)
+
+@router.get("/trip-sheet/drivers")
+async def get_trip_sheet_drivers_endpoint(
+    name: Optional[str] = Query(None),
+    phone: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("tripsheet:create"))
+):
+    from app.services.operations_service import get_trip_sheet_drivers
+    return await get_trip_sheet_drivers(db, current_user, name, phone)
+
+@router.get("/trip-sheet/vehicles")
+async def get_trip_sheet_vehicles_endpoint(
+    plate_number: Optional[str] = Query(None),
+    model: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("tripsheet:create"))
+):
+    from app.services.operations_service import get_trip_sheet_vehicles
+    return await get_trip_sheet_vehicles(db, current_user, plate_number, model)
+
+@router.get("/trip-sheet/franchises")
+async def get_trip_sheet_franchises_endpoint(
+    name: Optional[str] = Query(None),
+    pincode: Optional[str] = Query(None),
+    permanent_address: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("tripsheet:create"))
+):
+    from app.services.operations_service import get_trip_sheet_franchises
+    return await get_trip_sheet_franchises(db, current_user, name, pincode, permanent_address)
+
+@router.get("/trip-sheet/scan/{barcode}")
+async def scan_order_for_trip_sheet_endpoint(
+    barcode: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("tripsheet:create"))
+):
+    from app.services.operations_service import scan_order_for_trip_sheet
+    return await scan_order_for_trip_sheet(db, current_user, barcode)
+
+@router.get("/trip-sheet/incoming")
+async def list_incoming_trip_sheets_endpoint(
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("tripsheet:view"))
+):
+    from app.services.operations_service import list_incoming_trip_sheets
+    return await list_incoming_trip_sheets(db, current_user, page, limit)
+
+@router.get("/trip-sheet")
+async def list_trip_sheets_endpoint(
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("tripsheet:create"))
+):
+    from app.services.operations_service import list_trip_sheets
+    return await list_trip_sheets(db, current_user, page, limit)
+
+@router.get("/trip-sheet/{trip_sheet_id}")
+async def get_trip_sheet_by_id_endpoint(
+    trip_sheet_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("tripsheet:create"))
+):
+    from app.services.operations_service import get_trip_sheet_by_id
+    return await get_trip_sheet_by_id(db, current_user, trip_sheet_id)
+
+@router.put("/trip-sheet/{trip_sheet_id}")
+async def update_trip_sheet_endpoint(
+    trip_sheet_id: str,
+    data: TripSheetRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("tripsheet:update"))
+):
+    from app.services.operations_service import update_trip_sheet
+    return await update_trip_sheet(db, trip_sheet_id, data, current_user)
+
+@router.delete("/trip-sheet/{trip_sheet_id}")
+async def delete_trip_sheet_endpoint(
+    trip_sheet_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("tripsheet:delete"))
+):
+    from app.services.operations_service import delete_trip_sheet
+    await delete_trip_sheet(db, trip_sheet_id, current_user)
+    return {"message": "Trip sheet deleted successfully"}
