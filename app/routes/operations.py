@@ -168,6 +168,17 @@ async def scan_order_for_trip_sheet_endpoint(
     from app.services.operations_service import scan_order_for_trip_sheet
     return await scan_order_for_trip_sheet(db, current_user, barcode)
 
+@router.get("/trip-sheet/incoming")
+async def list_incoming_trip_sheets_endpoint(
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("tripsheet:view"))
+):
+    from app.services.operations_service import list_incoming_trip_sheets
+    return await list_incoming_trip_sheets(db, current_user, page, limit)
+
 @router.get("/trip-sheet")
 async def list_trip_sheets_endpoint(
     page: int = Query(1, ge=1),

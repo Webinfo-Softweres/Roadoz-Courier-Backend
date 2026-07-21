@@ -18,8 +18,8 @@ class TripSheet(Base):
     
     # Destination & Routing
     is_local: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
-    route: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    destination: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    route_city : Mapped[list | None] = mapped_column(JSON, nullable=True)
+    destination_city: Mapped[str | None] = mapped_column(String(255), nullable=True)
     
     destination_franchise_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("franchises.id", ondelete="SET NULL"), nullable=True, index=True)
     route_franchise_ids: Mapped[dict | None] = mapped_column(JSON, nullable=True) # store as JSON list
