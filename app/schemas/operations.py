@@ -273,8 +273,8 @@ class TripSheetRequest(BaseModel):
     driver_id: Optional[str] = None
     vehicle_id: Optional[str] = None
     is_local: bool = False
-    route: Optional[List[str]] = []
-    destination: Optional[str] = None
+    route_city: Optional[List[str]] = []
+    destination_city: Optional[str] = None
 
 class TripSheetItem(BaseModel):
     sl_no: int
@@ -291,8 +291,8 @@ class TripSheetResponse(BaseModel):
     driver_id: Optional[str] = None
     vehicle_id: Optional[str] = None
     is_local: bool = False
-    route: Optional[List[str]] = []
-    destination: Optional[str] = None
+    route_city: Optional[List[str]] = []
+    destination_city: Optional[str] = None
     items: List[TripSheetItem]
     topay_freight: float
     topay_packages: int
@@ -418,8 +418,8 @@ class TripSheetDetailOut(BaseModel):
     driver_id: Optional[str]
     vehicle_id: Optional[str]
     is_local: bool
-    route: Optional[List[str]]
-    destination: Optional[str]
+    route_city: Optional[List[str]]
+    destination_city: Optional[str]
 
     topay_freight: float
     topay_packages: int

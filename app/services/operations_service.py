@@ -323,8 +323,8 @@ async def generate_trip_sheet(db: AsyncSession, data: "TripSheetRequest", curren
         destination_franchise_id=data.destination_franchise_id,
         route_franchise_ids=data.route_franchise_ids,
         is_local=data.is_local,
-        route=data.route,
-        destination=data.destination,
+        route_city=data.route_city,
+        destination_city=data.destination_city,
         driver_id=data.driver_id,
         vehicle_id=data.vehicle_id,
         topay_freight=topay_freight,
@@ -343,14 +343,40 @@ async def generate_trip_sheet(db: AsyncSession, data: "TripSheetRequest", curren
     db.add(trip_sheet)
     db.add_all(trip_sheet_orders)
     await db.flush()
-    
+
+    # Send real-time WebSocket notification to the destination franchise
+    if data.destination_franchise_id:
+        from app.websocket.franchise_manager import franchise_manager
+        # Resolve sender franchise name for the notification payload
+        sender_name = None
+        if franchise_id:
+            from app.models.franchise import Franchise as FranchiseModel
+            sender = (await db.execute(select(FranchiseModel).where(FranchiseModel.id == franchise_id))).scalar_one_or_none()
+            if sender:
+                sender_name = sender.name
+                sender_address=sender.address
+                sender_pincode=sender.pincode
+        await franchise_manager.send_to_franchise(
+            data.destination_franchise_id,
+            {
+                "event": "new_incoming_trip_sheet",
+                "trip_sheet_id": trip_sheet.id,
+                "from_franchise_id": franchise_id,
+                "from_franchise_name": sender_name,
+                "from_franchise_address":sender_address,
+                "from_franchise_pincode":sender_pincode,
+                "total_packages": total_packages,
+                "total_freight": float(total_freight),
+            }
+        )
+
     return TripSheetResponse(
         id=trip_sheet.id,
         destination_franchise_id=data.destination_franchise_id,
         route_franchise_ids=data.route_franchise_ids,
         is_local=data.is_local,
-        route=data.route,
-        destination=data.destination,
+        route_city=data.route_city,
+        destination_city=data.destination_city,
         driver_id=data.driver_id,
         vehicle_id=data.vehicle_id,
         items=items,
@@ -462,8 +488,8 @@ async def update_trip_sheet(db: AsyncSession, trip_sheet_id: str, data: "TripShe
     trip_sheet.destination_franchise_id = data.destination_franchise_id
     trip_sheet.route_franchise_ids = data.route_franchise_ids
     trip_sheet.is_local = data.is_local
-    trip_sheet.route = data.route
-    trip_sheet.destination = data.destination
+    trip_sheet.route_city = data.route_city
+    trip_sheet.destination_city = data.destination_city
     trip_sheet.driver_id = data.driver_id
     trip_sheet.vehicle_id = data.vehicle_id
     trip_sheet.topay_freight = topay_freight
@@ -677,13 +703,26 @@ async def get_trip_sheet_by_id(db: AsyncSession, current_user: User, trip_sheet_
     franchise_id = await _resolve_franchise_id(db, current_user)
     warehouse_id = await _resolve_warehouse_id(db, current_user)
 
-    filters = [TripSheet.id == trip_sheet_id]
+    # A trip sheet is accessible if:
+    # 1. The user created it (franchise_id or warehouse_id matches), OR
+    # 2. The user's franchise is the destination franchise
+    from sqlalchemy import or_
+    access_filter = TripSheet.id == trip_sheet_id
     if franchise_id:
-        filters.append(TripSheet.franchise_id == franchise_id)
+        access_filter = and_(
+            TripSheet.id == trip_sheet_id,
+            or_(
+                TripSheet.franchise_id == franchise_id,
+                TripSheet.destination_franchise_id == franchise_id
+            )
+        )
     elif warehouse_id:
-        filters.append(TripSheet.warehouse_id == warehouse_id)
+        access_filter = and_(
+            TripSheet.id == trip_sheet_id,
+            TripSheet.warehouse_id == warehouse_id
+        )
 
-    query = select(TripSheet).where(and_(*filters))
+    query = select(TripSheet).where(access_filter)
     trip_sheet = (await db.execute(query)).scalar_one_or_none()
 
     if not trip_sheet:
@@ -745,8 +784,8 @@ async def get_trip_sheet_by_id(db: AsyncSession, current_user: User, trip_sheet_
         destination_franchise_id=trip_sheet.destination_franchise_id,
         route_franchise_ids=trip_sheet.route_franchise_ids,
         is_local=trip_sheet.is_local,
-        route=trip_sheet.route,
-        destination=trip_sheet.destination,
+        route_city=trip_sheet.route_city,
+        destination_city=trip_sheet.destination_city,
         driver_id=trip_sheet.driver_id,
         vehicle_id=trip_sheet.vehicle_id,
         topay_freight=float(trip_sheet.topay_freight),
@@ -768,3 +807,62 @@ async def get_trip_sheet_by_id(db: AsyncSession, current_user: User, trip_sheet_
         orders=order_details,
     )
 
+
+async def list_incoming_trip_sheets(
+    db: AsyncSession,
+    current_user: User,
+    page: int,
+    limit: int
+) -> dict:
+    """
+    Returns trip sheets where the current user's franchise is the DESTINATION franchise.
+    These are trip sheets sent TO this franchise from another franchise/warehouse.
+    """
+    from app.models.trip_sheet import TripSheet
+    from app.schemas.operations import TripSheetListOut
+    import math
+
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+
+    filters = []
+    if franchise_id:
+        filters.append(TripSheet.destination_franchise_id == franchise_id)
+    elif warehouse_id:
+        # A warehouse doesn't receive "incoming" trip sheets in the same way,
+        # but if we needed to filter for them, we would.
+        # For now, return an empty list or filter to impossible condition
+        # if warehouses shouldn't see anything here.
+        filters.append(TripSheet.destination_franchise_id == "impossible_for_warehouse")
+
+    # If both franchise_id and warehouse_id are None, it's a global admin.
+    # They see all trip sheets (or all that have a destination).
+    if not franchise_id and not warehouse_id:
+        filters.append(TripSheet.destination_franchise_id.isnot(None))
+
+    total_query = select(func.count()).select_from(TripSheet)
+    if filters:
+        total_query = total_query.where(and_(*filters))
+    total = (await db.execute(total_query)).scalar() or 0
+
+    offset = (page - 1) * limit
+    query = select(TripSheet)
+    if filters:
+        query = query.where(and_(*filters))
+    
+    query = (
+        query.order_by(TripSheet.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    trip_sheets = (await db.execute(query)).scalars().all()
+
+    items = [TripSheetListOut.model_validate(ts) for ts in trip_sheets]
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "pages": math.ceil(total / limit) if total else 0
+    }
