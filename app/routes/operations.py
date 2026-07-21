@@ -221,3 +221,9 @@ async def delete_trip_sheet_endpoint(
     from app.services.operations_service import delete_trip_sheet
     await delete_trip_sheet(db, trip_sheet_id, current_user)
     return {"message": "Trip sheet deleted successfully"}
+
+
+
+
+
+# fasdfasdfasd
