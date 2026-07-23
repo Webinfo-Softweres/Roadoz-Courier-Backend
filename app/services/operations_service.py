@@ -347,8 +347,9 @@ async def generate_trip_sheet(db: AsyncSession, data: "TripSheetRequest", curren
     # Send real-time WebSocket notification to the destination franchise
     if data.destination_franchise_id:
         from app.websocket.franchise_manager import franchise_manager
-        # Resolve sender franchise name for the notification payload
         sender_name = None
+        sender_address = None
+        sender_pincode = None
         if franchise_id:
             from app.models.franchise import Franchise as FranchiseModel
             sender = (await db.execute(select(FranchiseModel).where(FranchiseModel.id == franchise_id))).scalar_one_or_none()
