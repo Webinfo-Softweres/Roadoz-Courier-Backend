@@ -5,7 +5,8 @@ from pydantic import BaseModel, Field
 
 
 class ApproveDriverRequest(BaseModel):
-    franchise_id: str = Field(..., min_length=1)
+    franchise_id: Optional[str] = None
+    warehouse_id: Optional[str] = None
 
 
 class RejectDriverRequest(BaseModel):

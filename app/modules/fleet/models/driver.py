@@ -17,6 +17,9 @@ class Driver(Base):
     franchise_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("franchises.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    warehouse_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("warehouse_addresses.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     vehicle_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("vehicles.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -38,6 +41,7 @@ class Driver(Base):
 
     user = relationship("User", lazy="selectin")
     franchise = relationship("Franchise", lazy="selectin")
+    warehouse = relationship("WareHouseAddress", lazy="selectin")
     vehicle = relationship("Vehicle", lazy="selectin")
     payout_account = relationship(
         "DriverPayoutAccount", back_populates="driver", uselist=False, lazy="selectin"

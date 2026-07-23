@@ -554,12 +554,12 @@ async def get_trip_sheet_drivers(db: AsyncSession, current_user: User, name: Opt
     from app.schemas.operations import TripSheetDriverOut
     from sqlalchemy import or_
     
-    franchise_id = await _resolve_franchise_id(db, current_user)
-    warehouse_id = await _resolve_warehouse_id(db, current_user)
+    from app.modules.fleet.services.fleet_management_service import _resolve_franchise_id as _fm_resolve_franchise, _resolve_warehouse_id as _fm_resolve_warehouse, _apply_driver_scope
+    
+    fm_franchise_id = await _fm_resolve_franchise(db, current_user)
+    fm_warehouse_id = await _fm_resolve_warehouse(db, current_user)
     
     filters = []
-    if franchise_id:
-        filters.append(Driver.franchise_id == franchise_id)
     
     if name:
         filters.append(or_(Driver.first_name.ilike(f"%{name}%"), Driver.last_name.ilike(f"%{name}%")))
@@ -569,6 +569,8 @@ async def get_trip_sheet_drivers(db: AsyncSession, current_user: User, name: Opt
     query = select(Driver)
     if filters:
         query = query.where(and_(*filters))
+    
+    query = _apply_driver_scope(query, fm_franchise_id, fm_warehouse_id)
         
     drivers = (await db.execute(query)).scalars().all()
     return [TripSheetDriverOut.model_validate(d) for d in drivers]
@@ -578,11 +580,12 @@ async def get_trip_sheet_vehicles(db: AsyncSession, current_user: User, plate_nu
     from app.modules.fleet.models.vehicle import Vehicle
     from app.schemas.operations import TripSheetVehicleOut
     
-    franchise_id = await _resolve_franchise_id(db, current_user)
+    from app.modules.fleet.services.fleet_management_service import _resolve_franchise_id as _fm_resolve_franchise, _resolve_warehouse_id as _fm_resolve_warehouse, _apply_vehicle_scope
+    
+    fm_franchise_id = await _fm_resolve_franchise(db, current_user)
+    fm_warehouse_id = await _fm_resolve_warehouse(db, current_user)
     
     filters = []
-    if franchise_id:
-        filters.append(Vehicle.franchise_id == franchise_id)
         
     if plate_number:
         filters.append(Vehicle.plate_number.ilike(f"%{plate_number}%"))
@@ -592,6 +595,8 @@ async def get_trip_sheet_vehicles(db: AsyncSession, current_user: User, plate_nu
     query = select(Vehicle)
     if filters:
         query = query.where(and_(*filters))
+        
+    query = _apply_vehicle_scope(query, fm_franchise_id, fm_warehouse_id)
         
     vehicles = (await db.execute(query)).scalars().all()
     return [TripSheetVehicleOut.model_validate(v) for v in vehicles]
