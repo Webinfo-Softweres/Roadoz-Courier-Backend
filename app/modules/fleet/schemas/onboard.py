@@ -11,6 +11,8 @@ class RegisterRequest(BaseModel):
     password: str = Field(..., min_length=8)
     dob: date
     phone: str = Field(..., min_length=5, max_length=30)
+    franchise_id: Optional[str] = None
+    warehouse_id: Optional[str] = None
 
 
 class RegisterResponse(BaseModel):
