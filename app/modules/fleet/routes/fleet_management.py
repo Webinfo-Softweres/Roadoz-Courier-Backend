@@ -112,7 +112,7 @@ async def create_driver_endpoint(
     payload:      RegisterRequest,
     db:           AsyncSession = Depends(get_db),
     current_user: User         = Depends(get_current_user),
-    _:            User         = Depends(require_permission("fleet:drivers:approve")),
+    _:            User         = Depends(require_permission("fleet:drivers:create")),
 ):
     """
     Create a new driver account.
@@ -146,7 +146,7 @@ async def update_driver_endpoint(
     # ── Auth ──────────────────────────────────────────────────
     db:           AsyncSession = Depends(get_db),
     current_user: User         = Depends(get_current_user),
-    _:            User         = Depends(require_permission("fleet:drivers:view")),
+    _:            User         = Depends(require_permission("fleet:drivers:update")),
 ):
     """
     Update a driver in one call (multipart/form-data).
@@ -217,7 +217,7 @@ async def delete_driver_endpoint(
     driver_id:    str,
     db:           AsyncSession = Depends(get_db),
     current_user: User         = Depends(get_current_user),
-    _:            User         = Depends(require_permission("fleet:drivers:approve")),
+    _:            User         = Depends(require_permission("fleet:drivers:delete")),
 ):
     """
     Soft-delete a driver (sets deleted_at, deactivates their user account).
@@ -240,7 +240,7 @@ async def upload_document_endpoint(
     file:         UploadFile = File(...),
     db:           AsyncSession = Depends(get_db),
     current_user: User         = Depends(get_current_user),
-    _:            User         = Depends(require_permission("fleet:drivers:approve")),
+    _:            User         = Depends(require_permission("fleet:drivers:create")),
 ):
     """
     Upload a driver document (license_front, license_back, vehicle_insurance).
@@ -260,7 +260,7 @@ async def create_bank_details_endpoint(
     payload:      BankDetailsRequest,
     db:           AsyncSession = Depends(get_db),
     current_user: User         = Depends(get_current_user),
-    _:            User         = Depends(require_permission("fleet:drivers:approve")),
+    _:            User         = Depends(require_permission("fleet:drivers:create")),
 ):
     """
     Save bank / payout details for a driver.
@@ -282,7 +282,7 @@ async def create_vehicle_endpoint(
     payload:      VehicleRequest,
     db:           AsyncSession = Depends(get_db),
     current_user: User         = Depends(get_current_user),
-    _:            User         = Depends(require_permission("fleet:drivers:approve")),
+    _:            User         = Depends(require_permission("fleet:vehicle:create")),
 ):
     """
     Create a new vehicle (independent of any driver).
@@ -305,7 +305,7 @@ async def list_vehicles_endpoint(
     status_filter: Optional[str]  = Query(None, alias="status"),
     db:            AsyncSession   = Depends(get_db),
     current_user:  User           = Depends(get_current_user),
-    _:             User           = Depends(require_permission("fleet:drivers:view")),
+    _:             User           = Depends(require_permission("fleet:vehicle:view")),
 ):
     """
     List vehicles (paginated + optional filters).
@@ -325,7 +325,7 @@ async def get_vehicle_endpoint(
     vehicle_id:   str,
     db:           AsyncSession = Depends(get_db),
     current_user: User         = Depends(get_current_user),
-    _:            User         = Depends(require_permission("fleet:drivers:view")),
+    _:            User         = Depends(require_permission("fleet:vehicle:view")),
 ):
     """
     Get a single vehicle's details.
@@ -344,7 +344,7 @@ async def update_vehicle_endpoint(
     payload:      VehicleUpdateRequest,
     db:           AsyncSession = Depends(get_db),
     current_user: User         = Depends(get_current_user),
-    _:            User         = Depends(require_permission("fleet:drivers:view")),
+    _:            User         = Depends(require_permission("fleet:vehicle:update")),
 ):
     """
     Update vehicle fields.
@@ -362,7 +362,7 @@ async def delete_vehicle_endpoint(
     vehicle_id:   str,
     db:           AsyncSession = Depends(get_db),
     current_user: User         = Depends(get_current_user),
-    _:            User         = Depends(require_permission("fleet:drivers:approve")),
+    _:            User         = Depends(require_permission("fleet:vehicle:delete")),
 ):
     """
     Soft-delete a vehicle.

@@ -152,19 +152,23 @@ DEFAULT_PERMISSIONS = [
     ("month_end_closing", "approve", "Approve month end closing payments"),
 
     ("reset", "location", "Reset warehouse or franchise location"),
-    # Fleet drivers
-    ("fleet", "drivers:view", "View driver onboarding queue"),
+    # Fleet Management
+    ("fleet", "drivers:create", "Create drivers"),
+    ("fleet", "drivers:update", "Update drivers"),
+    ("fleet", "drivers:delete", "Delete drivers"),
+    ("fleet", "drivers:view", "View drivers"),
     ("fleet", "drivers:approve", "Approve or reject driver applications"),
+    
+    ("fleet", "vehicle:create", "Create vehicles"),
+    ("fleet", "vehicle:view", "View vehicles"),
+    ("fleet", "vehicle:update", "Update vehicles"),
+    ("fleet", "vehicle:delete", "Delete vehicles"),
     
     # Trip Sheets
     ("tripsheet", "create", "Create trip sheets"),
     ("tripsheet", "view", "View trip sheets"),
     ("tripsheet", "update", "Update trip sheets"),
     ("tripsheet", "delete", "Delete trip sheets"),
-
-    # Fleet drivers
-    ("fleet", "drivers:view", "View driver onboarding queue"),
-    ("fleet", "drivers:approve", "Approve or reject driver applications"),
 
 ]
 
