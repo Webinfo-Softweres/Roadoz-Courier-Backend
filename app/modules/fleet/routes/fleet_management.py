@@ -47,11 +47,17 @@ async def _get_role_scope(db: AsyncSession, user: User):
 # ─── Schemas ──────────────────────────────────────────────────────────────────
 
 class DriverUpdateRequest(BaseModel):
+    # Driver details (all optional)
     first_name: Optional[str] = None
     last_name:  Optional[str] = None
     phone:      Optional[str] = None
     dob:        Optional[date] = None
     status:     Optional[str] = None
+    # Bank details (all optional — only updated if at least one is provided)
+    accountHolderName:  Optional[str] = None
+    bankName:           Optional[str] = None
+    accountNumber:      Optional[str] = None
+    ifscOrRoutingCode:  Optional[str] = None
 
 
 class DriverOut(BaseModel):
@@ -121,21 +127,89 @@ async def create_driver_endpoint(
 
 @router.patch("/fleet/drivers/{driver_id}", response_model=DriverOut)
 async def update_driver_endpoint(
-    driver_id:    str,
-    payload:      DriverUpdateRequest,
+    driver_id:         str,
+    # ── Driver basic fields (Form) ────────────────────────────
+    first_name:        Optional[str]  = Form(None),
+    last_name:         Optional[str]  = Form(None),
+    phone:             Optional[str]  = Form(None),
+    dob:               Optional[date] = Form(None),
+    status:            Optional[str]  = Form(None),
+    # ── Bank detail fields (Form) ─────────────────────────────
+    accountHolderName: Optional[str]  = Form(None),
+    bankName:          Optional[str]  = Form(None),
+    accountNumber:     Optional[str]  = Form(None),
+    ifscOrRoutingCode: Optional[str]  = Form(None),
+    # ── Document files (all optional) ─────────────────────────
+    license_front:     Optional[UploadFile] = File(None),
+    license_back:      Optional[UploadFile] = File(None),
+    vehicle_insurance: Optional[UploadFile] = File(None),
+    # ── Auth ──────────────────────────────────────────────────
     db:           AsyncSession = Depends(get_db),
     current_user: User         = Depends(get_current_user),
     _:            User         = Depends(require_permission("fleet:drivers:view")),
 ):
     """
-    Update driver details.
-    - Admin / Warehouse → can update any driver.
-    - Franchise user    → can only update drivers belonging to their franchise.
+    Update a driver in one call (multipart/form-data).
+    All fields are optional — only provided fields are updated.
+    - Driver details : first_name, last_name, phone, dob, status
+    - Bank details   : accountHolderName, bankName, accountNumber, ifscOrRoutingCode
+    - Documents      : license_front, license_back, vehicle_insurance (image files)
     """
     franchise_id, warehouse_id, is_admin = await _get_role_scope(db, current_user)
 
-    from app.modules.fleet.services.fleet_management_service import update_driver
-    return await update_driver(db, current_user, driver_id, payload.model_dump(exclude_none=True))
+    from app.modules.fleet.services.fleet_management_service import (
+        update_driver, upload_document, create_bank_details
+    )
+
+    # 1. Update basic driver fields if any are provided
+    driver_fields = {k: v for k, v in {
+        "first_name": first_name,
+        "last_name":  last_name,
+        "phone":      phone,
+        "dob":        dob,
+        "status":     status,
+    }.items() if v is not None}
+
+    if driver_fields:
+        driver = await update_driver(db, current_user, driver_id, driver_fields)
+    else:
+        # Still need the driver object for documents/bank
+        from app.modules.fleet.services.fleet_management_service import _resolve_franchise_id, _resolve_warehouse_id, _apply_driver_scope
+        from sqlalchemy import select as _select
+        from app.modules.fleet.models.driver import Driver as _Driver
+        _fid = await _resolve_franchise_id(db, current_user)
+        _wid = await _resolve_warehouse_id(db, current_user)
+        _q = _select(_Driver).where(_Driver.id == driver_id, _Driver.deleted_at.is_(None))
+        _q = _apply_driver_scope(_q, _fid, _wid)
+        driver = (await db.execute(_q)).scalar_one_or_none()
+        if not driver:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Driver not found")
+
+    # 2. Upload documents if any files are provided
+    docs_to_upload = {
+        "license_front":     license_front,
+        "license_back":      license_back,
+        "vehicle_insurance": vehicle_insurance,
+    }
+    for doc_type, file in docs_to_upload.items():
+        if file is not None:
+            await upload_document(db, current_user, driver_id, doc_type, file)
+
+    # 3. Update bank details if any bank field is provided
+    bank_fields = {k: v for k, v in {
+        "accountHolderName":  accountHolderName,
+        "bankName":           bankName,
+        "accountNumber":      accountNumber,
+        "ifscOrRoutingCode":  ifscOrRoutingCode,
+    }.items() if v is not None}
+
+    if bank_fields:
+        await create_bank_details(db, current_user, driver_id, bank_fields)
+
+    await db.commit()
+    await db.refresh(driver)
+    return driver
 
 
 @router.delete("/fleet/drivers/{driver_id}", status_code=status.HTTP_204_NO_CONTENT)

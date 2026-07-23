@@ -273,11 +273,24 @@ async def create_bank_details(
 
     if driver_full.payout_account:
         payout = driver_full.payout_account
-        payout.account_holder_name  = payload["accountHolderName"]
-        payout.bank_name            = payload["bankName"]
-        payout.account_number       = payload["accountNumber"]
-        payout.ifsc_or_routing_code = payload["ifscOrRoutingCode"]
+        # Only update fields that are actually provided (partial update support)
+        if "accountHolderName" in payload:
+            payout.account_holder_name  = payload["accountHolderName"]
+        if "bankName" in payload:
+            payout.bank_name            = payload["bankName"]
+        if "accountNumber" in payload:
+            payout.account_number       = payload["accountNumber"]
+        if "ifscOrRoutingCode" in payload:
+            payout.ifsc_or_routing_code = payload["ifscOrRoutingCode"]
     else:
+        # Creating new payout account — all fields required
+        required = {"accountHolderName", "bankName", "accountNumber", "ifscOrRoutingCode"}
+        missing = required - payload.keys()
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Missing required bank fields: {', '.join(sorted(missing))}",
+            )
         db.add(DriverPayoutAccount(
             driver_id=driver.id,
             account_holder_name=payload["accountHolderName"],
