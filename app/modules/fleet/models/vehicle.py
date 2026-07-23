@@ -14,6 +14,9 @@ class Vehicle(Base):
     franchise_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("franchises.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    warehouse_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("warehouse_addresses.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     type: Mapped[str] = mapped_column(String(50), nullable=False)
     plate_number: Mapped[str] = mapped_column(String(50), nullable=False)
     make: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -28,3 +31,4 @@ class Vehicle(Base):
     )
 
     franchise = relationship("Franchise", lazy="selectin")
+    warehouse = relationship("WareHouseAddress", lazy="selectin")
