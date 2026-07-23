@@ -43,11 +43,10 @@ async def get_driver(
 @router.post("/drivers/{driver_id}/approve", response_model=DriverDetailOut)
 async def approve(
     driver_id: str,
-    payload: ApproveDriverRequest,
     current_user: User = Depends(require_permission("fleet:drivers:approve")),
     db: AsyncSession = Depends(get_db),
 ):
-    await approve_driver(db, current_user, driver_id, getattr(payload, "franchise_id", None), getattr(payload, "warehouse_id", None))
+    await approve_driver(db, current_user, driver_id)
     return await get_driver_detail(db, current_user, driver_id)
 
 

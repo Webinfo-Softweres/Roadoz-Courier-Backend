@@ -65,6 +65,8 @@ async def register_driver(db: AsyncSession, data: RegisterRequest) -> RegisterRe
         dob=data.dob,
         onboarding_status="incomplete",
         status="draft",
+        franchise_id=data.franchise_id,
+        warehouse_id=data.warehouse_id,
     )
     db.add(driver)
     await db.flush()

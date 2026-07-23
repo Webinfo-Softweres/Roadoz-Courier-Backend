@@ -105,7 +105,7 @@ async def get_driver_detail(db: AsyncSession, current_user: User, driver_id: str
     )
 
 
-async def approve_driver(db: AsyncSession, current_user: User, driver_id: str, franchise_id: str | None, warehouse_id: str | None) -> Driver:
+async def approve_driver(db: AsyncSession, current_user: User, driver_id: str) -> Driver:
     driver = await get_driver_by_id(db, current_user, driver_id)
     if not driver:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver not found")
@@ -118,6 +118,9 @@ async def approve_driver(db: AsyncSession, current_user: User, driver_id: str, f
     from app.modules.fleet.services.fleet_management_service import _resolve_franchise_id, _resolve_warehouse_id
     caller_franchise_id = await _resolve_franchise_id(db, current_user)
     caller_warehouse_id = await _resolve_warehouse_id(db, current_user)
+
+    franchise_id = None
+    warehouse_id = None
 
     # ── Assignment resolution ──────────────────────────────────────────────────
     # Rule 1: If the driver already has an assignment (created via web dashboard),
