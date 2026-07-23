@@ -327,8 +327,8 @@ async def create_vehicle(
 
     vehicle = Vehicle(
         id=str(uuid.uuid4()),
-        type=req.type,
-        plate_number=req.plateNumber,
+        type=req.vehicleType,
+        plate_number=req.registrationNumber,
         make=req.make,
         model=req.model,
         year=req.year,
