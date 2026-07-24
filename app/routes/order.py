@@ -220,15 +220,15 @@ async def update_consignee_endpoint(
     return await update_consignee(db, consignee_id, data, current_user)
 
 
-@router.delete("/consignees/{consignee_id}", status_code=204)
+@router.delete("/consignees/{consignee_id}", status_code=http_status.HTTP_200_OK)
 async def delete_consignee_endpoint(
     consignee_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: User = Depends(require_permission("consignees:delete")),
 ):
-    await delete_consignee(db, consignee_id, current_user)
-    return Response(status_code=204)
+    return await delete_consignee(db, consignee_id, current_user)
+    
 
 
 # â”€â”€ Orders â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
