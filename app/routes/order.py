@@ -1,5 +1,6 @@
 import base64
-from typing import Optional
+from app.utils.location import haversine_distance
+from app.core.config import settings
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Query, status as http_status, File, UploadFile, Form
 from fastapi.responses import Response
@@ -1446,6 +1447,8 @@ async def preload_tracking_statuses(db: AsyncSession, order_ids: List[str]) -> D
 async def process_order_scan(
     db: AsyncSession, 
     order: Order, 
+    driver_lat: float,
+    driver_lng: float,
     gps_pincode: str, 
     current_user: User,
     tracking_cache: Dict = None
@@ -1482,7 +1485,7 @@ async def process_order_scan(
         )
         has_pickup = existing.scalar_one_or_none() is not None
 
-    if pickup and str(pickup.pincode).strip().replace(" ", "") == str(gps_pincode).strip().replace(" ", ""):
+    if pickup and haversine_distance(driver_lat, driver_lng, pickup.latitude, pickup.longitude) <= settings.LOCATION_RADIUS_METERS:
         if has_pickup:
             raise HTTPException(status_code=409, detail="Pickup already done")
         
@@ -1523,12 +1526,12 @@ async def process_order_scan(
             "success": True
         }
     
-    # 2. Check Warehouse (exact match)
+    # 2. Check Warehouse (radius match)
     matched_warehouse = None
     warehouse_index = 0
     for i, mapping in enumerate(warehouse_mappings, start=1):
         wh = mapping.warehouse_address
-        if wh and str(wh.pincode).strip() == gps_pincode:
+        if wh and haversine_distance(driver_lat, driver_lng, wh.latitude, wh.longitude) <= settings.LOCATION_RADIUS_METERS:
             matched_warehouse = wh
             warehouse_index = i
             break
@@ -1541,10 +1544,10 @@ async def process_order_scan(
             existing = await db.execute(
                 select(WarehouseToDelivery).where(
                     WarehouseToDelivery.order_id == order.id,
-                    WarehouseToDelivery.pincode == gps_pincode
+                    WarehouseToDelivery.warehouse_addresses_id == matched_warehouse.id
                 )
             )
-            if existing.scalar_one_or_none():
+            if existing.scalars().first():
                 raise HTTPException(status_code=409, detail="Warehouse already processed")
         
         if not has_pickup:
@@ -1627,12 +1630,12 @@ async def process_order_scan(
             "success": True
         }
     
-    # 3. Check Franchise (exact match)
+    # 3. Check Franchise (radius match)
     matched_franchise = None
     franchise_index = 0
     for i, mapping in enumerate(franchise_mappings, start=1):
         fr = mapping.franchise_address
-        if fr and str(fr.pincode).strip() == gps_pincode:
+        if fr and haversine_distance(driver_lat, driver_lng, fr.latitude, fr.longitude) <= settings.LOCATION_RADIUS_METERS:
             matched_franchise = fr
             franchise_index = i
             break
@@ -1644,10 +1647,10 @@ async def process_order_scan(
             existing = await db.execute(
                 select(FranchiseToDelivery).where(
                     FranchiseToDelivery.order_id == order.id,
-                    FranchiseToDelivery.pincode == gps_pincode
+                    FranchiseToDelivery.franchise_addresses_id == matched_franchise.id
                 )
             )
-            if existing.scalar_one_or_none():
+            if existing.scalars().first():
                 raise HTTPException(status_code=409, detail="Franchise already processed")
         
         if not has_pickup:
@@ -1728,10 +1731,9 @@ async def process_order_scan(
             "gps_pincode": gps_pincode,
             "success": True
         }
-    print('pincode,',consignee.pincode,"===========pincode",gps_pincode)
+    print('pincode,',consignee.pincode,"===========",gps_pincode)
     # 4. Check Delivery
-    if consignee and str(consignee.pincode).strip().replace(" ", "") == str(gps_pincode).strip().replace(" ", ""):
-        print('pincode,',consignee.pincode,"===========pincode",gps_pincode)
+    if consignee and haversine_distance(driver_lat, driver_lng, consignee.latitude, consignee.longitude) <= settings.LOCATION_RADIUS_METERS:
         if not has_pickup:
             raise HTTPException(status_code=400, detail="Cannot deliver an order without picking it up first")
             
@@ -1780,14 +1782,9 @@ async def process_order_scan(
             "gps_pincode": gps_pincode,
             "success": True
         }
-    
     # 5. Try global warehouse match
-    warehouse_stmt = await db.execute(
-        select(WareHouseAddress).where(
-            func.replace(func.trim(WareHouseAddress.pincode), ' ', '') == gps_pincode
-        )
-    )
-    global_warehouse = warehouse_stmt.scalar_one_or_none()
+    warehouses = (await db.execute(select(WareHouseAddress))).scalars().all()
+    global_warehouse = next((wh for wh in warehouses if haversine_distance(driver_lat, driver_lng, wh.latitude, wh.longitude) <= settings.LOCATION_RADIUS_METERS), None)
     
     if global_warehouse:
         # Check if already mapped
@@ -1806,10 +1803,10 @@ async def process_order_scan(
             existing_tracking = await db.execute(
                 select(WarehouseToDelivery).where(
                     WarehouseToDelivery.order_id == order.id,
-                    WarehouseToDelivery.pincode == gps_pincode
+                    WarehouseToDelivery.warehouse_addresses_id == global_warehouse.id
                 )
             )
-            if existing_tracking.scalar_one_or_none():
+            if existing_tracking.scalars().first():
                 raise HTTPException(status_code=409, detail="Warehouse already processed")
         
         # Add mapping if not exists
@@ -1908,12 +1905,8 @@ async def process_order_scan(
         }
     
     # 6. Try global franchise match
-    franchise_stmt = await db.execute(
-        select(Franchise).where(
-            func.replace(func.trim(Franchise.pincode), ' ', '') == gps_pincode
-        )
-    )
-    global_franchise = franchise_stmt.scalar_one_or_none()
+    franchises = (await db.execute(select(Franchise))).scalars().all()
+    global_franchise = next((fr for fr in franchises if haversine_distance(driver_lat, driver_lng, fr.latitude, fr.longitude) <= settings.LOCATION_RADIUS_METERS), None)
     
     if global_franchise:
         existing_mapping_stmt = await db.execute(
@@ -1930,10 +1923,10 @@ async def process_order_scan(
             existing_tracking = await db.execute(
                 select(FranchiseToDelivery).where(
                     FranchiseToDelivery.order_id == order.id,
-                    FranchiseToDelivery.pincode == gps_pincode
+                    FranchiseToDelivery.franchise_addresses_id == global_franchise.id
                 )
             )
-            if existing_tracking.scalar_one_or_none():
+            if existing_tracking.scalars().first():
                 raise HTTPException(status_code=409, detail="Franchise already processed")
         
         if not existing_mapping:
@@ -2027,7 +2020,7 @@ async def process_order_scan(
     
     raise HTTPException(
         status_code=400,
-        detail=f"GPS pincode {gps_pincode} does not match pickup, warehouse, franchise, or delivery location for this order"
+        detail=f"GPS location does not match pickup, warehouse, franchise, or delivery location for this order"
     )
 
 
@@ -2154,6 +2147,8 @@ async def process_order_scan(
 async def process_bag_scan(
     db: AsyncSession,
     bag: Bag,
+    driver_lat: float,
+    driver_lng: float,
     gps_pincode: str,
     current_user: User
 ):
@@ -2201,7 +2196,7 @@ async def process_bag_scan(
         
         try:
             # Process order scan
-            result = await process_order_scan(db, order, gps_pincode, current_user, tracking_cache)
+            result = await process_order_scan(db, order, driver_lat, driver_lng, gps_pincode, current_user, tracking_cache)
             await db.refresh(order)
             
             stage = result.get("stage")
@@ -2313,7 +2308,7 @@ async def scan_with_location(
     
     # NO try-except with rollback - let the session handle it automatically
     if scan_target["type"] == "order":
-        result = await process_order_scan(db, scan_target["data"], gps_pincode, current_user)
+        result = await process_order_scan(db, scan_target["data"], lat, lng, gps_pincode, current_user)
         await db.commit()
         
         return {
@@ -2330,7 +2325,7 @@ async def scan_with_location(
     
     elif scan_target["type"] == "bag":
         # Process bag WITHOUT any transaction management here
-        result = await process_bag_scan(db, scan_target["data"], gps_pincode, current_user)
+        result = await process_bag_scan(db, scan_target["data"], lat, lng, gps_pincode, current_user)
         
         # NO commit here - let process_bag_scan handle it
         return {

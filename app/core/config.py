@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./franchise.db"
     
     # here Geocoding api key
-    HERE_API_KEY :str
+    HERE_API_KEY: str = ""
     
     # JWT
     SECRET_KEY: str = secrets.token_urlsafe(32)
@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = True
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:8000"
+
+    LOCATION_RADIUS_METERS: int = 100
 
     @property
     def allowed_origins_list(self) -> List[str]:
