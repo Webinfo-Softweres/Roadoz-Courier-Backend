@@ -25,7 +25,7 @@ async def get_drivers(
     onboarding_status: str | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
-    current_user: User = Depends(require_permission("fleet:drivers:view")),
+    current_user: User = Depends(require_permission("drivers:view")),
     db: AsyncSession = Depends(get_db),
 ):
     return await list_drivers(db, current_user, onboarding_status=onboarding_status, skip=skip, limit=limit)
@@ -34,7 +34,7 @@ async def get_drivers(
 @router.get("/drivers/{driver_id}", response_model=DriverDetailOut)
 async def get_driver(
     driver_id: str,
-    current_user: User = Depends(require_permission("fleet:drivers:view")),
+    current_user: User = Depends(require_permission("drivers:view")),
     db: AsyncSession = Depends(get_db),
 ):
     return await get_driver_detail(db, current_user, driver_id)
@@ -43,7 +43,7 @@ async def get_driver(
 @router.post("/drivers/{driver_id}/approve", response_model=DriverDetailOut)
 async def approve(
     driver_id: str,
-    current_user: User = Depends(require_permission("fleet:drivers:approve")),
+    current_user: User = Depends(require_permission("drivers:approve")),
     db: AsyncSession = Depends(get_db),
 ):
     await approve_driver(db, current_user, driver_id)
@@ -54,7 +54,7 @@ async def approve(
 async def reject(
     driver_id: str,
     payload: RejectDriverRequest,
-    current_user: User = Depends(require_permission("fleet:drivers:approve")),
+    current_user: User = Depends(require_permission("drivers:reject")),
     db: AsyncSession = Depends(get_db),
 ):
     await reject_driver(db, current_user, driver_id, payload.rejection_reason)
