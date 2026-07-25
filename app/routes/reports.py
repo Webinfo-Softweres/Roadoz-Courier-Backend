@@ -39,6 +39,7 @@ from app.services.report_service import (
     area_wise_business_report,
     performance_dashboard_report,
     month_end_closing_report,
+    tripsheet_report,
 )
 from app.services.export_service import export_to_csv, export_to_excel, export_to_pdf
 
@@ -520,4 +521,18 @@ async def performance_dashboard_report_endpoint(
     _: User = Depends(require_permission("orders:view")),
 ):
     data = await performance_dashboard_report(db, current_user, date_from, date_to, franchise_id)
+    return format_report_response(data, format)
+
+
+@router.get("/operations/tripsheets")
+async def tripsheet_report_endpoint(
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+    franchise_id: str | None = Query(None),
+    format: str = Query("json"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("orders:view")),
+):
+    data = await tripsheet_report(db, current_user, date_from, date_to, franchise_id)
     return format_report_response(data, format)

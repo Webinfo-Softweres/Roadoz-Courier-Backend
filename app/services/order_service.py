@@ -666,9 +666,11 @@ async def delete_consignee(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Consignee not found")
 
     franchise_id = await _resolve_franchise_id(db, current_user)
+
+    # Role-based access:
+    # - super_admin (franchise_id is None) → global access, no restriction
+    # - Franchise user (franchise_id is set) → can only delete consignees in their franchise
     if franchise_id and consignee.franchise_id != franchise_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    elif not franchise_id and consignee.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     # Check if consignee is linked to any order
@@ -681,7 +683,9 @@ async def delete_consignee(
 
     await db.delete(consignee)
     await db.flush()
-
+    return {
+        "message": "Consignee deleted successfully."
+    }
 
 
 async def generate_sku(db: AsyncSession) -> str:

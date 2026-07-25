@@ -14,6 +14,7 @@ from app.models.remittance import RemittanceOrder
 from app.models.role import Role
 from app.models.user import User
 from app.models.user_role import UserRole
+from app.models.trip_sheet import TripSheet
 from app.models.operations import Expense, CashVoucher, StaffAttendance, Manifest, PodRecord
 from app.models.activity_log import ActivityLog
 
@@ -168,9 +169,11 @@ async def daily_booking_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
+
+    # Determine the actual date range for the report
     if date_from or date_to:
         start_date = date_from
-        end_date = date_to
+        end_date = date_to or date.today()
     else:
         start_date = report_date or date.today()
         end_date = report_date or date.today()
@@ -181,11 +184,13 @@ async def daily_booking_report(
     elif scoped_warehouse_id:
         additional_filters.append(Order.warehouse_id == scoped_warehouse_id)
 
-    resolved_from, resolved_to, opening_amount = await _resolve_dates_and_opening(
+    # Calculate opening_amount: sum of shipping_charge BEFORE start_date
+    _, _, opening_amount = await _resolve_dates_and_opening(
         db, Order, Order.created_at, start_date, end_date, Order.shipping_charge, additional_filters
     )
 
-    filters = _order_filters(scoped_franchise_id, resolved_from, resolved_to, scoped_warehouse_id)
+    # Fetch orders for the full date range (start_date → end_date inclusive)
+    filters = _order_filters(scoped_franchise_id, start_date, end_date, scoped_warehouse_id)
     result = await db.execute(
         select(Order)
         .where(and_(*filters))
@@ -212,8 +217,8 @@ async def daily_booking_report(
 
     return {
         "report": "Daily Booking Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "opening_amount": opening_amount,
         "total_bookings": len(orders),
         "total_amount": total_amount,
@@ -233,17 +238,19 @@ async def customer_wise_booking_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
     additional_filters = []
     if scoped_franchise_id:
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
     elif scoped_warehouse_id:
         additional_filters.append(Order.warehouse_id == scoped_warehouse_id)
 
-    resolved_from, resolved_to, opening_vals = await _resolve_dates_and_opening(
-        db, Order, Order.created_at, date_from, date_to, [Order.shipping_charge, Order.cod_amount], additional_filters
+    _, _, opening_vals = await _resolve_dates_and_opening(
+        db, Order, Order.created_at, start_date, end_date, [Order.shipping_charge, Order.cod_amount], additional_filters
     )
 
-    filters = _order_filters(scoped_franchise_id, resolved_from, resolved_to, scoped_warehouse_id)
+    filters = _order_filters(scoped_franchise_id, start_date, end_date, scoped_warehouse_id)
     rows = (
         await db.execute(
             select(
@@ -276,8 +283,8 @@ async def customer_wise_booking_report(
 
     return {
         "report": "Customer Wise Booking Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "opening_revenue": opening_vals[0],
         "opening_pending_amount": opening_vals[1],
         "items": items,
@@ -297,17 +304,19 @@ async def service_type_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
     additional_filters = []
     if scoped_franchise_id:
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
     elif scoped_warehouse_id:
         additional_filters.append(Order.warehouse_id == scoped_warehouse_id)
 
-    resolved_from, resolved_to, opening_revenue = await _resolve_dates_and_opening(
-        db, Order, Order.created_at, date_from, date_to, Order.shipping_charge, additional_filters
+    _, _, opening_revenue = await _resolve_dates_and_opening(
+        db, Order, Order.created_at, start_date, end_date, Order.shipping_charge, additional_filters
     )
 
-    filters = _order_filters(scoped_franchise_id, resolved_from, resolved_to, scoped_warehouse_id)
+    filters = _order_filters(scoped_franchise_id, start_date, end_date, scoped_warehouse_id)
     rows = (
         await db.execute(
             select(Order.order_type, func.count(Order.id), func.coalesce(func.sum(Order.shipping_charge), 0))
@@ -331,8 +340,8 @@ async def service_type_report(
 
     return {
         "report": "Service Type Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "opening_amount": opening_revenue,
         "items": items,
         "totals": {
@@ -350,16 +359,15 @@ async def delivery_status_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
-    resolved_from, resolved_to, _ = await _resolve_dates_and_opening(
-        db, Order, Order.created_at, date_from, date_to, None, []
-    )
-    filters = _order_filters(scoped_franchise_id, resolved_from, resolved_to, scoped_warehouse_id)
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
+    filters = _order_filters(scoped_franchise_id, start_date, end_date, scoped_warehouse_id)
     result = await db.execute(select(Order).where(and_(*filters)).order_by(Order.updated_at.desc()))
     orders = result.scalars().all()
     return {
         "report": "Delivery Status Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "items": [
             {
                 "awb_no": order.order_number,
@@ -382,14 +390,13 @@ async def pending_delivery_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
-    resolved_from, resolved_to, _ = await _resolve_dates_and_opening(
-        db, Order, Order.created_at, date_from, date_to, None, []
-    )
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
     terminal_statuses = [OrderStatus.DELIVERED, OrderStatus.CANCELLED, OrderStatus.RETURNED, OrderStatus.LOST]
     filters = [
         Order.status.notin_(terminal_statuses),
-        Order.created_at >= datetime.combine(resolved_from, datetime.min.time()),
-        Order.created_at <= datetime.combine(resolved_to, datetime.max.time()),
+        Order.created_at >= datetime.combine(start_date, datetime.min.time()),
+        Order.created_at <= datetime.combine(end_date, datetime.max.time()),
     ]
     if scoped_franchise_id:
         filters.append(Order.franchise_id == scoped_franchise_id)
@@ -398,8 +405,8 @@ async def pending_delivery_report(
     today = datetime.utcnow().date()
     return {
         "report": "Pending Delivery Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "items": [
             {
                 "awb_no": order.order_number,
@@ -421,6 +428,8 @@ async def cod_pending_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
     additional_filters = [
         Order.payment_method == "COD",
         Order.cod_amount.is_not(None),
@@ -429,16 +438,16 @@ async def cod_pending_report(
     if scoped_franchise_id:
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
 
-    resolved_from, resolved_to, opening_pending = await _resolve_dates_and_opening(
-        db, Order, Order.created_at, date_from, date_to, Order.cod_amount, additional_filters
+    _, _, opening_pending = await _resolve_dates_and_opening(
+        db, Order, Order.created_at, start_date, end_date, Order.cod_amount, additional_filters
     )
 
     filters = [
         Order.payment_method == "COD",
         Order.cod_amount.is_not(None),
         ~Order.id.in_(select(RemittanceOrder.order_id)),
-        Order.created_at >= datetime.combine(resolved_from, datetime.min.time()),
-        Order.created_at <= datetime.combine(resolved_to, datetime.max.time()),
+        Order.created_at >= datetime.combine(start_date, datetime.min.time()),
+        Order.created_at <= datetime.combine(end_date, datetime.max.time()),
     ]
     if scoped_franchise_id:
         filters.append(Order.franchise_id == scoped_franchise_id)
@@ -463,8 +472,8 @@ async def cod_pending_report(
 
     return {
         "report": "COD Pending Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "opening_amount": opening_pending,
         "total_pending_amount": total_pending,
         "items": items,
@@ -483,14 +492,16 @@ async def gst_sales_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
     additional_filters = []
     if scoped_franchise_id:
         additional_filters.append(Invoice.franchise_id == scoped_franchise_id)
     elif scoped_warehouse_id:
         additional_filters.append(Invoice.warehouse_id == scoped_warehouse_id)
 
-    resolved_from, resolved_to, opening_vals = await _resolve_dates_and_opening(
-        db, Invoice, Invoice.created_at, date_from, date_to, [Invoice.subtotal, Invoice.tax_amount, Invoice.total_amount], additional_filters
+    _, _, opening_vals = await _resolve_dates_and_opening(
+        db, Invoice, Invoice.created_at, start_date, end_date, [Invoice.subtotal, Invoice.tax_amount, Invoice.total_amount], additional_filters
     )
 
     filters = []
@@ -498,8 +509,8 @@ async def gst_sales_report(
         filters.append(Invoice.franchise_id == scoped_franchise_id)
     elif scoped_warehouse_id:
         filters.append(Invoice.warehouse_id == scoped_warehouse_id)
-    filters.append(Invoice.created_at >= datetime.combine(resolved_from, datetime.min.time()))
-    filters.append(Invoice.created_at <= datetime.combine(resolved_to, datetime.max.time()))
+    filters.append(Invoice.created_at >= datetime.combine(start_date, datetime.min.time()))
+    filters.append(Invoice.created_at <= datetime.combine(end_date, datetime.max.time()))
 
     invoices = (await db.execute(select(Invoice).where(and_(*filters)).order_by(Invoice.created_at.desc()))).scalars().all()
     items = [
@@ -522,8 +533,8 @@ async def gst_sales_report(
 
     return {
         "report": "GST Sales Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "opening_taxable_amount": opening_vals[0],
         "opening_cgst": _to_float(opening_vals[1] / 2),
         "opening_sgst": _to_float(opening_vals[1] / 2),
@@ -549,17 +560,19 @@ async def franchise_settlement_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
     additional_filters = []
     if scoped_franchise_id:
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
     elif scoped_warehouse_id:
         additional_filters.append(Order.warehouse_id == scoped_warehouse_id)
 
-    resolved_from, resolved_to, opening_revenue = await _resolve_dates_and_opening(
-        db, Order, Order.created_at, date_from, date_to, Order.shipping_charge, additional_filters
+    _, _, opening_revenue = await _resolve_dates_and_opening(
+        db, Order, Order.created_at, start_date, end_date, Order.shipping_charge, additional_filters
     )
 
-    filters = _order_filters(scoped_franchise_id, resolved_from, resolved_to, scoped_warehouse_id)
+    filters = _order_filters(scoped_franchise_id, start_date, end_date, scoped_warehouse_id)
     rows = (
         await db.execute(
             select(
@@ -605,8 +618,8 @@ async def franchise_settlement_report(
 
     return {
         "report": "Franchise Settlement Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "opening_revenue": opening_rev_val,
         "opening_ho_share": opening_ho,
         "opening_franchise_share": opening_franchise,
@@ -713,10 +726,9 @@ async def delivery_efficiency_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
-    resolved_from, resolved_to, _ = await _resolve_dates_and_opening(
-        db, Order, Order.created_at, date_from, date_to, None, []
-    )
-    filters = _order_filters(scoped_franchise_id, resolved_from, resolved_to, scoped_warehouse_id)
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
+    filters = _order_filters(scoped_franchise_id, start_date, end_date, scoped_warehouse_id)
     rows = (
         await db.execute(
             select(Franchise.id, Franchise.name, Order.status, func.count(Order.id))
@@ -747,8 +759,8 @@ async def delivery_efficiency_report(
 
     return {
         "report": "Delivery Efficiency Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "items": items,
         "totals": {
             "assigned": total_assigned,
@@ -857,12 +869,14 @@ async def branch_activity_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
     additional_filters = [CashVoucher.type == "receipt"]
     if scoped_franchise_id:
         additional_filters.append(CashVoucher.franchise_id == scoped_franchise_id)
 
-    resolved_from, resolved_to, opening_collections = await _resolve_dates_and_opening(
-        db, CashVoucher, CashVoucher.voucher_date, date_from, date_to, CashVoucher.amount, additional_filters
+    _, _, opening_collections = await _resolve_dates_and_opening(
+        db, CashVoucher, CashVoucher.voucher_date, start_date, end_date, CashVoucher.amount, additional_filters
     )
 
     franchise_filters = []
@@ -875,7 +889,7 @@ async def branch_activity_report(
             select(func.count(Order.id))
             .where(and_(
                 Order.franchise_id == f.id,
-                *_order_filters(None, resolved_from, resolved_to)[1:]
+                *_order_filters(None, start_date, end_date)[1:]
             ))
         )).scalar_one()
         
@@ -884,7 +898,7 @@ async def branch_activity_report(
             .where(and_(
                 Order.franchise_id == f.id,
                 Order.status == OrderStatus.DELIVERED,
-                *_order_filters(None, resolved_from, resolved_to)[1:]
+                *_order_filters(None, start_date, end_date)[1:]
             ))
         )).scalar_one()
         
@@ -894,7 +908,7 @@ async def branch_activity_report(
             .where(and_(
                 Order.franchise_id == f.id,
                 Order.status.notin_(terminal_statuses),
-                *_order_filters(None, resolved_from, resolved_to)[1:]
+                *_order_filters(None, start_date, end_date)[1:]
             ))
         )).scalar_one()
         
@@ -903,8 +917,8 @@ async def branch_activity_report(
             .where(and_(
                 CashVoucher.franchise_id == f.id,
                 CashVoucher.type == "receipt",
-                CashVoucher.voucher_date >= resolved_from,
-                CashVoucher.voucher_date <= resolved_to
+                CashVoucher.voucher_date >= start_date,
+                CashVoucher.voucher_date <= end_date
             ))
         )).scalar_one()
         
@@ -923,8 +937,8 @@ async def branch_activity_report(
 
     return {
         "report": "Branch Activity Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "opening_collections": opening_collections,
         "items": items,
         "totals": {
@@ -945,9 +959,8 @@ async def user_activity_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
-    resolved_from, resolved_to, _ = await _resolve_dates_and_opening(
-        db, Order, Order.created_at, date_from, date_to, None, []
-    )
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
     filters = []
     if scoped_franchise_id:
         filters.append(User.franchise_id == scoped_franchise_id)
@@ -978,8 +991,8 @@ async def user_activity_report(
             select(func.count(Order.id))
             .where(and_(
                 Order.created_by == u.id,
-                Order.created_at >= datetime.combine(resolved_from, datetime.min.time()),
-                Order.created_at <= datetime.combine(resolved_to, datetime.max.time())
+                Order.created_at >= datetime.combine(start_date, datetime.min.time()),
+                Order.created_at <= datetime.combine(end_date, datetime.max.time())
             ))
         )).scalar_one()
         
@@ -991,8 +1004,8 @@ async def user_activity_report(
         })
     return {
         "report": "User Activity Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "items": items
     }
 
@@ -1006,13 +1019,12 @@ async def returned_shipment_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
-    resolved_from, resolved_to, _ = await _resolve_dates_and_opening(
-        db, Order, Order.created_at, date_from, date_to, None, []
-    )
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
     filters = [
         Order.status.in_([OrderStatus.RETURNED, OrderStatus.RTO_DELIVERED, OrderStatus.RTO_IN_TRANSIT]),
-        Order.created_at >= datetime.combine(resolved_from, datetime.min.time()),
-        Order.created_at <= datetime.combine(resolved_to, datetime.max.time())
+        Order.created_at >= datetime.combine(start_date, datetime.min.time()),
+        Order.created_at <= datetime.combine(end_date, datetime.max.time())
     ]
     if scoped_franchise_id:
         filters.append(Order.franchise_id == scoped_franchise_id)
@@ -1020,8 +1032,8 @@ async def returned_shipment_report(
     orders = (await db.execute(select(Order).where(and_(*filters)).order_by(Order.updated_at.desc()))).scalars().all()
     return {
         "report": "Returned Shipment Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "items": [
             {
                 "awb_no": o.order_number,
@@ -1042,18 +1054,20 @@ async def collection_summary_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
     additional_filters = [CashVoucher.type == "receipt"]
     if scoped_franchise_id:
         additional_filters.append(CashVoucher.franchise_id == scoped_franchise_id)
 
-    resolved_from, resolved_to, opening_amount = await _resolve_dates_and_opening(
-        db, CashVoucher, CashVoucher.voucher_date, date_from, date_to, CashVoucher.amount, additional_filters
+    _, _, opening_amount = await _resolve_dates_and_opening(
+        db, CashVoucher, CashVoucher.voucher_date, start_date, end_date, CashVoucher.amount, additional_filters
     )
 
     filters = [
         CashVoucher.type == "receipt",
-        CashVoucher.voucher_date >= resolved_from,
-        CashVoucher.voucher_date <= resolved_to
+        CashVoucher.voucher_date >= start_date,
+        CashVoucher.voucher_date <= end_date
     ]
     if scoped_franchise_id:
         filters.append(CashVoucher.franchise_id == scoped_franchise_id)
@@ -1072,8 +1086,8 @@ async def collection_summary_report(
 
     return {
         "report": "Collection Summary Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "opening_amount": opening_amount,
         "items": items,
         "totals": {
@@ -1091,20 +1105,22 @@ async def outstanding_collection_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
     additional_filters = [Invoice.status == "pending"]
     if scoped_franchise_id:
         additional_filters.append(Invoice.franchise_id == scoped_franchise_id)
     elif scoped_warehouse_id:
         additional_filters.append(Invoice.warehouse_id == scoped_warehouse_id)
 
-    resolved_from, resolved_to, opening_balance = await _resolve_dates_and_opening(
-        db, Invoice, Invoice.created_at, date_from, date_to, Invoice.total_amount, additional_filters
+    _, _, opening_balance = await _resolve_dates_and_opening(
+        db, Invoice, Invoice.created_at, start_date, end_date, Invoice.total_amount, additional_filters
     )
 
     filters = [
         Invoice.status == "pending",
-        Invoice.created_at >= datetime.combine(resolved_from, datetime.min.time()),
-        Invoice.created_at <= datetime.combine(resolved_to, datetime.max.time())
+        Invoice.created_at >= datetime.combine(start_date, datetime.min.time()),
+        Invoice.created_at <= datetime.combine(end_date, datetime.max.time())
     ]
     if scoped_franchise_id:
         filters.append(Invoice.franchise_id == scoped_franchise_id)
@@ -1125,8 +1141,8 @@ async def outstanding_collection_report(
 
     return {
         "report": "Outstanding Collection Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "opening_balance": opening_balance,
         "items": items,
         "totals": {
@@ -1144,19 +1160,21 @@ async def daily_collection_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
     additional_filters = [CashVoucher.type == "receipt"]
     if scoped_franchise_id:
         additional_filters.append(CashVoucher.franchise_id == scoped_franchise_id)
 
-    resolved_from, resolved_to, opening_total = await _resolve_dates_and_opening(
-        db, CashVoucher, CashVoucher.voucher_date, date_from, date_to, CashVoucher.amount, additional_filters
+    _, _, opening_total = await _resolve_dates_and_opening(
+        db, CashVoucher, CashVoucher.voucher_date, start_date, end_date, CashVoucher.amount, additional_filters
     )
 
     # Let's resolve cash vs bank opening split
     opening_cash = (await db.execute(
         select(func.coalesce(func.sum(CashVoucher.amount), 0))
         .where(and_(
-            CashVoucher.voucher_date < resolved_from,
+            CashVoucher.voucher_date < start_date,
             CashVoucher.type == "receipt",
             CashVoucher.payment_mode.ilike("%cash%"),
             CashVoucher.franchise_id == scoped_franchise_id if scoped_franchise_id else True
@@ -1166,7 +1184,7 @@ async def daily_collection_report(
     opening_upi = (await db.execute(
         select(func.coalesce(func.sum(CashVoucher.amount), 0))
         .where(and_(
-            CashVoucher.voucher_date < resolved_from,
+            CashVoucher.voucher_date < start_date,
             CashVoucher.type == "receipt",
             CashVoucher.payment_mode.ilike("%upi%"),
             CashVoucher.franchise_id == scoped_franchise_id if scoped_franchise_id else True
@@ -1177,8 +1195,8 @@ async def daily_collection_report(
 
     filters = [
         CashVoucher.type == "receipt",
-        CashVoucher.voucher_date >= resolved_from,
-        CashVoucher.voucher_date <= resolved_to
+        CashVoucher.voucher_date >= start_date,
+        CashVoucher.voucher_date <= end_date
     ]
     if scoped_franchise_id:
         filters.append(CashVoucher.franchise_id == scoped_franchise_id)
@@ -1212,8 +1230,8 @@ async def daily_collection_report(
 
     return {
         "report": "Daily Collection Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "opening_cash": _to_float(opening_cash),
         "opening_upi": _to_float(opening_upi),
         "opening_bank_transfer": opening_bank,
@@ -1237,6 +1255,8 @@ async def cod_settlement_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
     additional_filters = [
         Order.payment_method == "COD",
         Order.status == OrderStatus.DELIVERED,
@@ -1244,15 +1264,15 @@ async def cod_settlement_report(
     if scoped_franchise_id:
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
 
-    resolved_from, resolved_to, opening_cod = await _resolve_dates_and_opening(
-        db, Order, Order.created_at, date_from, date_to, Order.cod_amount, additional_filters
+    _, _, opening_cod = await _resolve_dates_and_opening(
+        db, Order, Order.created_at, start_date, end_date, Order.cod_amount, additional_filters
     )
 
     filters = [
         Order.payment_method == "COD",
         Order.status == OrderStatus.DELIVERED,
-        Order.created_at >= datetime.combine(resolved_from, datetime.min.time()),
-        Order.created_at <= datetime.combine(resolved_to, datetime.max.time())
+        Order.created_at >= datetime.combine(start_date, datetime.min.time()),
+        Order.created_at <= datetime.combine(end_date, datetime.max.time())
     ]
     if scoped_franchise_id:
         filters.append(Order.franchise_id == scoped_franchise_id)
@@ -1290,8 +1310,8 @@ async def cod_settlement_report(
 
     return {
         "report": "COD Settlement Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "opening_amount": opening_cod_val,
         "opening_commission": opening_comm_val,
         "opening_net_payable": opening_net_val,
@@ -1313,6 +1333,8 @@ async def cod_commission_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
     additional_filters = [
         Order.payment_method == "COD",
         Order.status == OrderStatus.DELIVERED,
@@ -1320,15 +1342,15 @@ async def cod_commission_report(
     if scoped_franchise_id:
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
 
-    resolved_from, resolved_to, opening_cod = await _resolve_dates_and_opening(
-        db, Order, Order.created_at, date_from, date_to, Order.cod_amount, additional_filters
+    _, _, opening_cod = await _resolve_dates_and_opening(
+        db, Order, Order.created_at, start_date, end_date, Order.cod_amount, additional_filters
     )
 
     filters = [
         Order.payment_method == "COD",
         Order.status == OrderStatus.DELIVERED,
-        Order.created_at >= datetime.combine(resolved_from, datetime.min.time()),
-        Order.created_at <= datetime.combine(resolved_to, datetime.max.time())
+        Order.created_at >= datetime.combine(start_date, datetime.min.time()),
+        Order.created_at <= datetime.combine(end_date, datetime.max.time())
     ]
     if scoped_franchise_id:
         filters.append(Order.franchise_id == scoped_franchise_id)
@@ -1355,8 +1377,8 @@ async def cod_commission_report(
 
     return {
         "report": "COD Commission Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "opening_amount": _to_float(opening_cod * 0.05),
         "items": items,
         "totals": {
@@ -1374,19 +1396,17 @@ async def cash_book_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
     additional_filters = []
     if scoped_franchise_id:
         additional_filters.append(CashVoucher.franchise_id == scoped_franchise_id)
 
-    resolved_from, resolved_to, _ = await _resolve_dates_and_opening(
-        db, CashVoucher, CashVoucher.voucher_date, date_from, date_to, None, additional_filters
-    )
-
-    # Let's resolve the opening balance before resolved_from
+    # Let's resolve the opening balance before start_date
     opening_credit = (await db.execute(
         select(func.coalesce(func.sum(CashVoucher.amount), 0))
         .where(and_(
-            CashVoucher.voucher_date < resolved_from,
+            CashVoucher.voucher_date < start_date,
             CashVoucher.type == "receipt",
             *additional_filters
         ))
@@ -1395,7 +1415,7 @@ async def cash_book_report(
     opening_debit = (await db.execute(
         select(func.coalesce(func.sum(CashVoucher.amount), 0))
         .where(and_(
-            CashVoucher.voucher_date < resolved_from,
+            CashVoucher.voucher_date < start_date,
             CashVoucher.type == "payment",
             *additional_filters
         ))
@@ -1404,8 +1424,8 @@ async def cash_book_report(
     opening_balance = _to_float(float(opening_credit) - float(opening_debit))
 
     filters = [
-        CashVoucher.voucher_date >= resolved_from,
-        CashVoucher.voucher_date <= resolved_to
+        CashVoucher.voucher_date >= start_date,
+        CashVoucher.voucher_date <= end_date
     ]
     if scoped_franchise_id:
         filters.append(CashVoucher.franchise_id == scoped_franchise_id)
@@ -1432,8 +1452,8 @@ async def cash_book_report(
 
     return {
         "report": "Cash Book Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "opening_balance": opening_balance,
         "items": items,
         "totals": {
@@ -1453,17 +1473,19 @@ async def expense_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
     additional_filters = []
     if scoped_franchise_id:
         additional_filters.append(Expense.franchise_id == scoped_franchise_id)
 
-    resolved_from, resolved_to, opening_amount = await _resolve_dates_and_opening(
-        db, Expense, Expense.expense_date, date_from, date_to, Expense.amount, additional_filters
+    _, _, opening_amount = await _resolve_dates_and_opening(
+        db, Expense, Expense.expense_date, start_date, end_date, Expense.amount, additional_filters
     )
 
     filters = [
-        Expense.expense_date >= resolved_from,
-        Expense.expense_date <= resolved_to
+        Expense.expense_date >= start_date,
+        Expense.expense_date <= end_date
     ]
     if scoped_franchise_id:
         filters.append(Expense.franchise_id == scoped_franchise_id)
@@ -1481,8 +1503,8 @@ async def expense_report(
 
     return {
         "report": "Expense Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "opening_amount": opening_amount,
         "items": items,
         "totals": {
@@ -1500,6 +1522,8 @@ async def profit_loss_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
     
     # We resolve date using Order.created_at as primary transaction date
     additional_filters = []
@@ -1508,15 +1532,11 @@ async def profit_loss_report(
     elif scoped_warehouse_id:
         additional_filters.append(Order.warehouse_id == scoped_warehouse_id)
 
-    resolved_from, resolved_to, _ = await _resolve_dates_and_opening(
-        db, Order, Order.created_at, date_from, date_to, None, additional_filters
-    )
-
-    # Let's compute opening values before resolved_from
+    # Let's compute opening values before start_date
     opening_revenue_sum = (await db.execute(
         select(func.coalesce(func.sum(Order.shipping_charge), 0))
         .where(and_(
-            Order.created_at < datetime.combine(resolved_from, datetime.min.time()),
+            Order.created_at < datetime.combine(start_date, datetime.min.time()),
             *additional_filters
         ))
     )).scalar_one()
@@ -1526,7 +1546,7 @@ async def profit_loss_report(
         .where(and_(
             Order.payment_method == "COD",
             Order.status == OrderStatus.DELIVERED,
-            Order.created_at < datetime.combine(resolved_from, datetime.min.time()),
+            Order.created_at < datetime.combine(start_date, datetime.min.time()),
             *additional_filters
         ))
     )).scalar_one()
@@ -1536,7 +1556,7 @@ async def profit_loss_report(
     opening_expense_sum = (await db.execute(
         select(func.coalesce(func.sum(Expense.amount), 0))
         .where(and_(
-            Expense.expense_date < resolved_from,
+            Expense.expense_date < start_date,
             Expense.franchise_id == scoped_franchise_id if scoped_franchise_id else True
         ))
     )).scalar_one()
@@ -1544,7 +1564,7 @@ async def profit_loss_report(
     opening_profit = _to_float(opening_revenue - opening_expenses)
 
     # Calculate actual values in date range
-    filters_orders = _order_filters(scoped_franchise_id, resolved_from, resolved_to, scoped_warehouse_id)
+    filters_orders = _order_filters(scoped_franchise_id, start_date, end_date, scoped_warehouse_id)
     revenue_sum = (await db.execute(
         select(func.coalesce(func.sum(Order.shipping_charge), 0))
         .where(and_(*filters_orders))
@@ -1564,8 +1584,8 @@ async def profit_loss_report(
     filters_exp = []
     if scoped_franchise_id:
         filters_exp.append(Expense.franchise_id == scoped_franchise_id)
-    filters_exp.append(Expense.expense_date >= resolved_from)
-    filters_exp.append(Expense.expense_date <= resolved_to)
+    filters_exp.append(Expense.expense_date >= start_date)
+    filters_exp.append(Expense.expense_date <= end_date)
         
     expense_sum = (await db.execute(
         select(func.coalesce(func.sum(Expense.amount), 0))
@@ -1583,8 +1603,8 @@ async def profit_loss_report(
 
     return {
         "report": "Profit & Loss Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "opening_revenue": opening_revenue,
         "opening_expenses": opening_expenses,
         "opening_profit": opening_profit,
@@ -1606,17 +1626,19 @@ async def hsn_summary_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
     additional_filters = []
     if scoped_franchise_id:
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
     elif scoped_warehouse_id:
         additional_filters.append(Order.warehouse_id == scoped_warehouse_id)
 
-    resolved_from, resolved_to, opening_revenue = await _resolve_dates_and_opening(
-        db, Order, Order.created_at, date_from, date_to, Order.shipping_charge, additional_filters
+    _, _, opening_revenue = await _resolve_dates_and_opening(
+        db, Order, Order.created_at, start_date, end_date, Order.shipping_charge, additional_filters
     )
 
-    filters = _order_filters(scoped_franchise_id, resolved_from, resolved_to, scoped_warehouse_id)
+    filters = _order_filters(scoped_franchise_id, start_date, end_date, scoped_warehouse_id)
     revenue_sum = (await db.execute(
         select(func.coalesce(func.sum(Order.shipping_charge), 0))
         .where(and_(*filters))
@@ -1633,8 +1655,8 @@ async def hsn_summary_report(
 
     return {
         "report": "HSN Summary Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "opening_taxable_amount": opening_revenue,
         "opening_gst_amount": _to_float(opening_revenue * 0.18),
         "items": items,
@@ -1740,20 +1762,22 @@ async def franchise_outstanding_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
     additional_filters = [Invoice.status == "pending"]
     if scoped_franchise_id:
         additional_filters.append(Invoice.franchise_id == scoped_franchise_id)
     elif scoped_warehouse_id:
         additional_filters.append(Invoice.warehouse_id == scoped_warehouse_id)
 
-    resolved_from, resolved_to, opening_pending = await _resolve_dates_and_opening(
-        db, Invoice, Invoice.created_at, date_from, date_to, Invoice.total_amount, additional_filters
+    _, _, opening_pending = await _resolve_dates_and_opening(
+        db, Invoice, Invoice.created_at, start_date, end_date, Invoice.total_amount, additional_filters
     )
 
     filters = [
         Invoice.status == "pending",
-        Invoice.created_at >= datetime.combine(resolved_from, datetime.min.time()),
-        Invoice.created_at <= datetime.combine(resolved_to, datetime.max.time())
+        Invoice.created_at >= datetime.combine(start_date, datetime.min.time()),
+        Invoice.created_at <= datetime.combine(end_date, datetime.max.time())
     ]
     if scoped_franchise_id:
         filters.append(Invoice.franchise_id == scoped_franchise_id)
@@ -1774,8 +1798,8 @@ async def franchise_outstanding_report(
 
     return {
         "report": "Franchise Outstanding Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "opening_pending_amount": opening_pending,
         "items": items,
         "totals": {
@@ -1793,11 +1817,8 @@ async def franchise_collection_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
-    
-    # Resolve dates
-    resolved_from, resolved_to, _ = await _resolve_dates_and_opening(
-        db, Franchise, Franchise.created_at, date_from, date_to, None, []
-    )
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
 
     filters = []
     if scoped_franchise_id:
@@ -1817,7 +1838,7 @@ async def franchise_collection_report(
                 CashVoucher.franchise_id == f.id,
                 CashVoucher.type == "receipt",
                 CashVoucher.payment_mode.ilike("%cash%"),
-                CashVoucher.voucher_date < resolved_from
+                CashVoucher.voucher_date < start_date
             ))
         )).scalar_one()
 
@@ -1827,7 +1848,7 @@ async def franchise_collection_report(
                 CashVoucher.franchise_id == f.id,
                 CashVoucher.type == "receipt",
                 ~CashVoucher.payment_mode.ilike("%cash%"),
-                CashVoucher.voucher_date < resolved_from
+                CashVoucher.voucher_date < start_date
             ))
         )).scalar_one()
 
@@ -1835,7 +1856,7 @@ async def franchise_collection_report(
             select(func.coalesce(func.sum(Expense.amount), 0))
             .where(and_(
                 Expense.franchise_id == f.id,
-                Expense.expense_date < resolved_from
+                Expense.expense_date < start_date
             ))
         )).scalar_one()
 
@@ -1850,8 +1871,8 @@ async def franchise_collection_report(
                 CashVoucher.franchise_id == f.id,
                 CashVoucher.type == "receipt",
                 CashVoucher.payment_mode.ilike("%cash%"),
-                CashVoucher.voucher_date >= resolved_from,
-                CashVoucher.voucher_date <= resolved_to
+                CashVoucher.voucher_date >= start_date,
+                CashVoucher.voucher_date <= end_date
             ))
         )).scalar_one()
         
@@ -1861,8 +1882,8 @@ async def franchise_collection_report(
                 CashVoucher.franchise_id == f.id,
                 CashVoucher.type == "receipt",
                 ~CashVoucher.payment_mode.ilike("%cash%"),
-                CashVoucher.voucher_date >= resolved_from,
-                CashVoucher.voucher_date <= resolved_to
+                CashVoucher.voucher_date >= start_date,
+                CashVoucher.voucher_date <= end_date
             ))
         )).scalar_one()
         
@@ -1870,8 +1891,8 @@ async def franchise_collection_report(
             select(func.coalesce(func.sum(Expense.amount), 0))
             .where(and_(
                 Expense.franchise_id == f.id,
-                Expense.expense_date >= resolved_from,
-                Expense.expense_date <= resolved_to
+                Expense.expense_date >= start_date,
+                Expense.expense_date <= end_date
             ))
         )).scalar_one()
         
@@ -1890,8 +1911,8 @@ async def franchise_collection_report(
 
     return {
         "report": "Franchise Collection Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "opening_cash_collection": _to_float(total_cash_opening),
         "opening_bank_deposit": _to_float(total_bank_opening),
         "opening_balance": opening_balance_val,
@@ -1913,11 +1934,8 @@ async def franchise_profitability_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
-    
-    # Resolve dates
-    resolved_from, resolved_to, _ = await _resolve_dates_and_opening(
-        db, Franchise, Franchise.created_at, date_from, date_to, None, []
-    )
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
 
     filters = []
     if scoped_franchise_id:
@@ -1934,7 +1952,7 @@ async def franchise_profitability_report(
             select(func.coalesce(func.sum(Order.shipping_charge), 0))
             .where(and_(
                 Order.franchise_id == f.id,
-                Order.created_at < datetime.combine(resolved_from, datetime.min.time())
+                Order.created_at < datetime.combine(start_date, datetime.min.time())
             ))
         )).scalar_one()
 
@@ -1942,7 +1960,7 @@ async def franchise_profitability_report(
             select(func.coalesce(func.sum(Expense.amount), 0))
             .where(and_(
                 Expense.franchise_id == f.id,
-                Expense.expense_date < resolved_from
+                Expense.expense_date < start_date
             ))
         )).scalar_one()
 
@@ -1954,8 +1972,8 @@ async def franchise_profitability_report(
             select(func.coalesce(func.sum(Order.shipping_charge), 0))
             .where(and_(
                 Order.franchise_id == f.id,
-                Order.created_at >= datetime.combine(resolved_from, datetime.min.time()),
-                Order.created_at <= datetime.combine(resolved_to, datetime.max.time())
+                Order.created_at >= datetime.combine(start_date, datetime.min.time()),
+                Order.created_at <= datetime.combine(end_date, datetime.max.time())
             ))
         )).scalar_one()
         
@@ -1965,8 +1983,8 @@ async def franchise_profitability_report(
             select(func.coalesce(func.sum(Expense.amount), 0))
             .where(and_(
                 Expense.franchise_id == f.id,
-                Expense.expense_date >= resolved_from,
-                Expense.expense_date <= resolved_to
+                Expense.expense_date >= start_date,
+                Expense.expense_date <= end_date
             ))
         )).scalar_one()
         
@@ -1987,8 +2005,8 @@ async def franchise_profitability_report(
 
     return {
         "report": "Franchise Profitability Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "opening_revenue": opening_rev_val,
         "opening_expenses": opening_exp_val,
         "opening_profit": opening_profit_val,
@@ -2010,19 +2028,21 @@ async def area_wise_business_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
     additional_filters = []
     if scoped_franchise_id:
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
     elif scoped_warehouse_id:
         additional_filters.append(Order.warehouse_id == scoped_warehouse_id)
 
-    resolved_from, resolved_to, opening_revenue = await _resolve_dates_and_opening(
-        db, Order, Order.created_at, date_from, date_to, Order.shipping_charge, additional_filters
+    _, _, opening_revenue = await _resolve_dates_and_opening(
+        db, Order, Order.created_at, start_date, end_date, Order.shipping_charge, additional_filters
     )
 
     filters = [
-        Order.created_at >= datetime.combine(resolved_from, datetime.min.time()),
-        Order.created_at <= datetime.combine(resolved_to, datetime.max.time())
+        Order.created_at >= datetime.combine(start_date, datetime.min.time()),
+        Order.created_at <= datetime.combine(end_date, datetime.max.time())
     ]
     if scoped_franchise_id:
         filters.append(Order.franchise_id == scoped_franchise_id)
@@ -2068,8 +2088,8 @@ async def area_wise_business_report(
 
     return {
         "report": "Area Wise Business Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "opening_revenue": opening_revenue,
         "items": items,
         "totals": {
@@ -2089,11 +2109,8 @@ async def performance_dashboard_report(
 ) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
-    
-    # We resolve dates
-    resolved_from, resolved_to, _ = await _resolve_dates_and_opening(
-        db, Order, Order.created_at, date_from, date_to, None, []
-    )
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
     
     parameters = ["Bookings", "Revenue", "Expenses"]
     items = []
@@ -2105,14 +2122,14 @@ async def performance_dashboard_report(
             curr_val = float((await db.execute(
                 select(func.count(Order.id))
                 .where(and_(
-                    Order.created_at >= datetime.combine(resolved_from, datetime.min.time()),
-                    Order.created_at <= datetime.combine(resolved_to, datetime.max.time()),
+                    Order.created_at >= datetime.combine(start_date, datetime.min.time()),
+                    Order.created_at <= datetime.combine(end_date, datetime.max.time()),
                     Order.franchise_id == scoped_franchise_id if scoped_franchise_id else True
                 ))
             )).scalar_one())
             # Previous same length duration:
-            duration = resolved_to - resolved_from
-            prev_to = resolved_from - timedelta(days=1)
+            duration = end_date - start_date
+            prev_to = start_date - timedelta(days=1)
             prev_from = prev_to - duration
             prev_val = float((await db.execute(
                 select(func.count(Order.id))
@@ -2126,13 +2143,13 @@ async def performance_dashboard_report(
             curr_val = float((await db.execute(
                 select(func.coalesce(func.sum(Order.shipping_charge), 0))
                 .where(and_(
-                    Order.created_at >= datetime.combine(resolved_from, datetime.min.time()),
-                    Order.created_at <= datetime.combine(resolved_to, datetime.max.time()),
+                    Order.created_at >= datetime.combine(start_date, datetime.min.time()),
+                    Order.created_at <= datetime.combine(end_date, datetime.max.time()),
                     Order.franchise_id == scoped_franchise_id if scoped_franchise_id else True
                 ))
             )).scalar_one())
-            duration = resolved_to - resolved_from
-            prev_to = resolved_from - timedelta(days=1)
+            duration = end_date - start_date
+            prev_to = start_date - timedelta(days=1)
             prev_from = prev_to - duration
             prev_val = float((await db.execute(
                 select(func.coalesce(func.sum(Order.shipping_charge), 0))
@@ -2146,13 +2163,13 @@ async def performance_dashboard_report(
             curr_val = float((await db.execute(
                 select(func.coalesce(func.sum(Expense.amount), 0))
                 .where(and_(
-                    Expense.expense_date >= resolved_from,
-                    Expense.expense_date <= resolved_to,
+                    Expense.expense_date >= start_date,
+                    Expense.expense_date <= end_date,
                     Expense.franchise_id == scoped_franchise_id if scoped_franchise_id else True
                 ))
             )).scalar_one())
-            duration = resolved_to - resolved_from
-            prev_to = resolved_from - timedelta(days=1)
+            duration = end_date - start_date
+            prev_to = start_date - timedelta(days=1)
             prev_from = prev_to - duration
             prev_val = float((await db.execute(
                 select(func.coalesce(func.sum(Expense.amount), 0))
@@ -2176,8 +2193,8 @@ async def performance_dashboard_report(
         
     return {
         "report": "Performance Dashboard Report",
-        "date_from": resolved_from,
-        "date_to": resolved_to,
+        "date_from": start_date,
+        "date_to": end_date,
         "items": items
     }
 
@@ -2230,4 +2247,64 @@ async def month_end_closing_report(
         "data": data,
         "generated_at": datetime.now().isoformat(),
         "requested_by": current_user.email
+    }
+
+
+async def tripsheet_report(
+    db: AsyncSession,
+    current_user: User,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    franchise_id: str | None = None,
+) -> dict:
+    scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
+    scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
+    
+    start_date = date_from or date.today()
+    end_date = date_to or date.today()
+    
+    filters = [
+        TripSheet.created_at >= datetime.combine(start_date, datetime.min.time()),
+        TripSheet.created_at <= datetime.combine(end_date, datetime.max.time())
+    ]
+    
+    if scoped_franchise_id:
+        filters.append(TripSheet.franchise_id == scoped_franchise_id)
+    elif scoped_warehouse_id:
+        filters.append(TripSheet.warehouse_id == scoped_warehouse_id)
+        
+    result = await db.execute(
+        select(TripSheet)
+        .where(and_(*filters))
+        .order_by(TripSheet.created_at.desc())
+    )
+    tripsheets = result.scalars().all()
+    
+    items = []
+    total_freight = 0.0
+    total_packages = 0
+    
+    for ts in tripsheets:
+        items.append({
+            "tripsheet_id": ts.id,
+            "created_at": ts.created_at.strftime("%Y-%m-%d %H:%M:%S") if ts.created_at else "N/A",
+            "destination_city": ts.destination_city or "N/A",
+            "total_freight": _to_float(ts.total_freight),
+            "total_packages": ts.total_packages,
+            "is_local": ts.is_local,
+            "driver_id": ts.driver_id or "N/A",
+            "vehicle_id": ts.vehicle_id or "N/A"
+        })
+        total_freight += _to_float(ts.total_freight)
+        total_packages += ts.total_packages
+        
+    return {
+        "report": "Trip Sheet Report",
+        "date_from": start_date,
+        "date_to": end_date,
+        "items": items,
+        "totals": {
+            "total_freight": _to_float(total_freight),
+            "total_packages": total_packages
+        }
     }

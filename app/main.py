@@ -416,6 +416,7 @@ origins = [
     "http://localhost:3001",
     "http://127.0.0.1:3000",
     "https://www.roadozcourier.com",
+    "https://roadozcourier.com",
     "https://admin.roadozcourier.com",
     "https://staging.roadozcourier.com",
     "https://staging-admin.roadozcourier.com"
