@@ -41,9 +41,20 @@ class TripSheet(Base):
     total_freight: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, server_default=text("0"))
     total_packages: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     
+    # Driver mobile lifecycle
+    driver_status: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    offer_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    decline_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
     # Audit
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP"), onupdate=datetime.utcnow
+    )
 
     # Relationships
     orders = relationship("TripSheetOrder", back_populates="trip_sheet", cascade="all, delete-orphan", lazy="selectin")

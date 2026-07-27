@@ -21,6 +21,18 @@ async def _patch_sqlite_dev_schema():
     patches = [
         ("roles", "warehouse_id", "VARCHAR(36)"),
         ("users", "warehouse_id", "VARCHAR(36)"),
+        ("drivers", "warehouse_id", "VARCHAR(36)"),
+        ("drivers", "meta", "JSON"),
+        ("vehicles", "warehouse_id", "VARCHAR(36)"),
+        ("franchises", "latitude", "REAL"),
+        ("franchises", "longitude", "REAL"),
+        ("trip_sheets", "driver_status", "VARCHAR(30)"),
+        ("trip_sheets", "accepted_at", "DATETIME"),
+        ("trip_sheets", "started_at", "DATETIME"),
+        ("trip_sheets", "completed_at", "DATETIME"),
+        ("trip_sheets", "offer_expires_at", "DATETIME"),
+        ("trip_sheets", "decline_reason", "VARCHAR(500)"),
+        ("trip_sheets", "updated_at", "DATETIME"),
     ]
     drop_columns = [
         ("drivers", "public_id"),

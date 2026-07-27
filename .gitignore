@@ -86,6 +86,7 @@ docker-compose.override.yml
 # Uploaded files
 media/
 uploads/
+storage/bank_statements/
 *.jpg
 *.jpeg
 *.png

@@ -18,6 +18,7 @@ from app.routes import auth, franchise, profile, websocket, rbac, order, remitta
 from app.routes import auth, franchise, profile, websocket, rbac, order, remittance, invoice,warehouse, activity_log,consigeeauth,coningeereview,webconfiguration, analytics,user_admincommunication, rate_calculator, reports, prints, operations, location
 from app.routes import bulk_order, bag,label,user_franchise,consigeeuserorder, month_end_closing
 from app.modules.fleet.routes import mobile as fleet_mobile
+from app.modules.fleet.routes.driver_runtime import router as fleet_driver_runtime
 from app.modules.fleet.routes import admin as fleet_admin
 from app.modules.fleet.routes import fleet_management
 from app.models.activity_log import ActivityLog
@@ -29,6 +30,7 @@ from app.websocket.user_admin_chat import router as websocket_router
 from app.websocket.notification_socket import router as ws_router
 
 from app.websocket.trip_sheet_socket import router as trip_sheet_ws_router
+from app.websocket.driver_socket import router as driver_ws_router
 
 
 logging.basicConfig(
@@ -486,6 +488,8 @@ app.include_router(user_franchise.router,prefix=API_PREFIX)
 app.include_router(consigeeuserorder.router,prefix=API_PREFIX)
 app.include_router(month_end_closing.router,prefix=API_PREFIX)
 app.include_router(fleet_mobile.router)
+app.include_router(fleet_driver_runtime)
+app.include_router(driver_ws_router, prefix=API_PREFIX)
 app.include_router(fleet_admin.router, prefix="/api/v1/int/fleet")
 app.include_router(fleet_management.router, prefix=API_PREFIX)
 
