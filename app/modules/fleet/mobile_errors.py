@@ -4,7 +4,12 @@ from fastapi.responses import JSONResponse
 
 
 def is_mobile_fleet_path(path: str) -> bool:
-    return path == "/api/auth/register" or path.startswith("/api/driver/")
+    return (
+        path == "/api/auth/register"
+        or path.startswith("/api/driver/")
+        or path.startswith("/api/v1/driver/")
+        or path.startswith("/api/v1/auth/driver/")
+    )
 
 
 def mobile_error_response(status_code: int, message: str) -> JSONResponse:

@@ -448,12 +448,23 @@ async def generate_trip_sheet(db: AsyncSession, data: "TripSheetRequest", curren
         prepaid_packages=prepaid_packages,
         total_freight=total_freight,
         total_packages=total_packages,
-        created_by=current_user.id
+        created_by=current_user.id,
     )
+    from app.modules.fleet.services.trip_sheet_lifecycle import apply_driver_assignment_to_trip_sheet
+
+    apply_driver_assignment_to_trip_sheet(trip_sheet, data.driver_id, reset=True)
     
     db.add(trip_sheet)
     db.add_all(trip_sheet_orders)
     await db.flush()
+
+    if data.driver_id and trip_sheet.driver_status:
+        from app.websocket.driver_manager import driver_manager
+
+        await driver_manager.send_to_driver(
+            data.driver_id,
+            {"event": "TRIP_ASSIGNED", "payload": {"tripSheetId": trip_sheet.id}},
+        )
 
     # Send real-time WebSocket notification to the destination franchise
     if data.destination_franchise_id:
@@ -602,8 +613,12 @@ async def update_trip_sheet(db: AsyncSession, trip_sheet_id: str, data: "TripShe
     trip_sheet.is_local = data.is_local
     trip_sheet.route_city = data.route_city
     trip_sheet.destination_city = data.destination_city
-    trip_sheet.driver_id = data.driver_id
     trip_sheet.vehicle_id = data.vehicle_id
+    from app.modules.fleet.services.trip_sheet_lifecycle import apply_driver_assignment_to_trip_sheet
+
+    previous_driver_id = trip_sheet.driver_id
+    driver_changed = previous_driver_id != data.driver_id
+    apply_driver_assignment_to_trip_sheet(trip_sheet, data.driver_id, reset=driver_changed)
     trip_sheet.topay_freight = topay_freight
     trip_sheet.topay_packages = topay_packages
     trip_sheet.credit_freight = credit_freight
@@ -617,6 +632,21 @@ async def update_trip_sheet(db: AsyncSession, trip_sheet_id: str, data: "TripShe
     
     db.add_all(trip_sheet_orders)
     await db.flush()
+
+    if driver_changed and previous_driver_id and previous_driver_id != data.driver_id:
+        from app.websocket.driver_manager import driver_manager
+
+        await driver_manager.send_to_driver(
+            previous_driver_id,
+            {"event": "TRIP_CANCELLED", "payload": {"tripSheetId": trip_sheet.id}},
+        )
+    if data.driver_id and trip_sheet.driver_status and driver_changed:
+        from app.websocket.driver_manager import driver_manager
+
+        await driver_manager.send_to_driver(
+            data.driver_id,
+            {"event": "TRIP_ASSIGNED", "payload": {"tripSheetId": trip_sheet.id}},
+        )
 
     return TripSheetResponse(
         id=trip_sheet.id,
@@ -656,9 +686,18 @@ async def delete_trip_sheet(db: AsyncSession, trip_sheet_id: str, current_user: 
     trip_sheet = (await db.execute(query)).scalar_one_or_none()
     if not trip_sheet:
         raise HTTPException(status_code=404, detail="Trip sheet not found")
-        
+
+    cancelled_driver_id = trip_sheet.driver_id
     await db.delete(trip_sheet)
     await db.commit()
+
+    if cancelled_driver_id:
+        from app.websocket.driver_manager import driver_manager
+
+        await driver_manager.send_to_driver(
+            cancelled_driver_id,
+            {"event": "TRIP_CANCELLED", "payload": {"tripSheetId": trip_sheet_id}},
+        )
 
 async def get_trip_sheet_drivers(db: AsyncSession, current_user: User, name: Optional[str] = None, phone: Optional[str] = None):
     from app.modules.fleet.models.driver import Driver
