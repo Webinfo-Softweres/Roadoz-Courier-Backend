@@ -235,6 +235,9 @@ async def get_pod_by_order(db: AsyncSession, order_id: str, current_user: User) 
 async def generate_trip_sheet(db: AsyncSession, data: "TripSheetRequest", current_user: User):
     from app.schemas.operations import TripSheetResponse, TripSheetItem
     from app.models.trip_sheet import TripSheet, TripSheetOrder
+    from app.models.order import OrderStatus, PickupToConsignees, FranchiseToDelivery, WarehouseToDelivery, indian_time
+    from app.models.order_intransit import OrderInTransit
+    from app.services.notification_service import create_notification
     import uuid
     
     franchise_id = await _resolve_franchise_id(db, current_user)
@@ -275,6 +278,27 @@ async def generate_trip_sheet(db: AsyncSession, data: "TripSheetRequest", curren
     
     trip_sheet_id = str(uuid.uuid4())
     trip_sheet_orders = []
+
+    from app.utils.location import haversine_distance
+    from app.core.config import settings
+
+    sender_pincode = "UNKNOWN"
+    sender_lat = None
+    sender_lng = None
+    if franchise_id:
+        from app.models.franchise import Franchise as FranchiseModel
+        sender = (await db.execute(select(FranchiseModel).where(FranchiseModel.id == franchise_id))).scalar_one_or_none()
+        if sender:
+            sender_pincode = sender.pincode
+            sender_lat = sender.latitude
+            sender_lng = sender.longitude
+    elif warehouse_id:
+        from app.models.warehouse import WareHouseAddress as WarehouseModel
+        sender = (await db.execute(select(WarehouseModel).where(WarehouseModel.id == warehouse_id))).scalar_one_or_none()
+        if sender:
+            sender_pincode = sender.pincode
+            sender_lat = sender.latitude
+            sender_lng = sender.longitude
     
     for idx, order in enumerate(orders, start=1):
         freight = float(order.total_freight or 0)
@@ -315,6 +339,93 @@ async def generate_trip_sheet(db: AsyncSession, data: "TripSheetRequest", curren
                 sl_no=idx
             )
         )
+        
+        # Status Update Logic using lat/long distance
+        if data.lat and data.lng:
+            if order.status not in [OrderStatus.PICKED.value, OrderStatus.IN_TRANSIT.value, OrderStatus.DELIVERED.value, OrderStatus.RETURNED.value, OrderStatus.CANCELLED.value]:
+                # Check distance to pickup
+                pickup = order.pickup_address
+                pickup_dist = float('inf')
+                if pickup and pickup.latitude and pickup.longitude:
+                    pickup_dist = haversine_distance(data.lat, data.lng, pickup.latitude, pickup.longitude)
+
+                sender_dist = float('inf')
+                if sender_lat and sender_lng:
+                    sender_dist = haversine_distance(data.lat, data.lng, sender_lat, sender_lng)
+
+                if pickup_dist <= settings.LOCATION_RADIUS_METERS:
+                    order.previous_status = order.status
+                    order.status = OrderStatus.PICKED.value
+                    pickup_entry = PickupToConsignees(
+                        pincode=pickup.pincode if pickup.pincode else sender_pincode,
+                        status=OrderStatus.PICKED.value,
+                        order_id=order.id,
+                        pickup_addresses_id=pickup.id,
+                        user_id=current_user.id
+                    )
+                    db.add(pickup_entry)
+                    await create_notification(
+                        db=db,
+                        title="Order Picked",
+                        message=f"Order {order.order_number} picked successfully",
+                        type="order",
+                        order_id=order.id,
+                    )
+                elif sender_dist <= settings.LOCATION_RADIUS_METERS:
+                    order.previous_status = order.status
+                    order.status = OrderStatus.PICKED.value
+                    if franchise_id:
+                        entry = FranchiseToDelivery(
+                            pincode=sender_pincode,
+                            status=OrderStatus.PICKED.value,
+                            order_id=order.id,
+                            franchise_addresses_id=franchise_id,
+                            user_id=current_user.id
+                        )
+                        db.add(entry)
+                    elif warehouse_id:
+                        entry = WarehouseToDelivery(
+                            pincode=sender_pincode,
+                            status=OrderStatus.PICKED.value,
+                            order_id=order.id,
+                            warehouse_addresses_id=warehouse_id,
+                            user_id=current_user.id
+                        )
+                        db.add(entry)
+                    await create_notification(
+                        db=db,
+                        title="Order Picked",
+                        message=f"Order {order.order_number} picked successfully",
+                        type="order",
+                        order_id=order.id,
+                    )
+
+        if order.status != OrderStatus.IN_TRANSIT.value and order.status not in [OrderStatus.DELIVERED.value, OrderStatus.RETURNED.value, OrderStatus.CANCELLED.value]:
+            order.previous_status = order.status
+            order.status = OrderStatus.IN_TRANSIT.value
+            order.updated_at = indian_time()
+
+            # Store in-transit event in dedicated OrderInTransit model
+            intransit_entry = OrderInTransit(
+                order_id=order.id,
+                trip_sheet_id=trip_sheet_id,
+                status=OrderStatus.IN_TRANSIT.value,
+                latitude=data.lat if data.lat else None,
+                longitude=data.lng if data.lng else None,
+                pincode=sender_pincode,
+                franchise_id=franchise_id,
+                warehouse_id=warehouse_id,
+                dispatched_by=current_user.id
+            )
+            db.add(intransit_entry)
+                
+            await create_notification(
+                db=db,
+                title="Order In Transit",
+                message=f"Order {order.order_number} is now in transit",
+                type="order",
+                order_id=order.id,
+            )
         
     trip_sheet = TripSheet(
         id=trip_sheet_id,

@@ -140,7 +140,7 @@ async def _scope_franchise_id(db: AsyncSession, current_user: User, franchise_id
     return resolved
 
 
-def _order_filters(scoped_franchise_id: str | None, date_from: date | None, date_to: date | None, scoped_warehouse_id: str | None = None) -> list[Any]:
+def _order_filters(scoped_franchise_id: str | None, date_from: date | None, date_to: date | None, scoped_warehouse_id: str | None = None, payment_method: str | None = None) -> list[Any]:
     start, end = _date_range(date_from, date_to)
     filters = []
     if scoped_franchise_id:
@@ -151,6 +151,8 @@ def _order_filters(scoped_franchise_id: str | None, date_from: date | None, date
         filters.append(Order.created_at >= start)
     if end:
         filters.append(Order.created_at <= end)
+    if payment_method:
+        filters.append(Order.payment_method == payment_method)
     return filters
 
 
@@ -166,7 +168,7 @@ async def daily_booking_report(
     date_from: date | None = None,
     date_to: date | None = None,
     franchise_id: str | None = None,
-) -> dict:
+    payment_method: str | None = None) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
 
@@ -183,6 +185,8 @@ async def daily_booking_report(
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
     elif scoped_warehouse_id:
         additional_filters.append(Order.warehouse_id == scoped_warehouse_id)
+    if payment_method:
+        additional_filters.append(Order.payment_method == payment_method)
 
     # Calculate opening_amount: sum of shipping_charge BEFORE start_date
     _, _, opening_amount = await _resolve_dates_and_opening(
@@ -190,7 +194,7 @@ async def daily_booking_report(
     )
 
     # Fetch orders for the full date range (start_date → end_date inclusive)
-    filters = _order_filters(scoped_franchise_id, start_date, end_date, scoped_warehouse_id)
+    filters = _order_filters(scoped_franchise_id, start_date, end_date, scoped_warehouse_id, payment_method)
     result = await db.execute(
         select(Order)
         .where(and_(*filters))
@@ -235,7 +239,7 @@ async def customer_wise_booking_report(
     date_from: date | None = None,
     date_to: date | None = None,
     franchise_id: str | None = None,
-) -> dict:
+    payment_method: str | None = None) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     if date_from or date_to:
@@ -249,12 +253,14 @@ async def customer_wise_booking_report(
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
     elif scoped_warehouse_id:
         additional_filters.append(Order.warehouse_id == scoped_warehouse_id)
+    if payment_method:
+        additional_filters.append(Order.payment_method == payment_method)
 
     _, _, opening_vals = await _resolve_dates_and_opening(
         db, Order, Order.created_at, start_date, end_date, [Order.shipping_charge, Order.cod_amount], additional_filters
     )
 
-    filters = _order_filters(scoped_franchise_id, start_date, end_date, scoped_warehouse_id)
+    filters = _order_filters(scoped_franchise_id, start_date, end_date, scoped_warehouse_id, payment_method)
     rows = (
         await db.execute(
             select(
@@ -307,7 +313,7 @@ async def service_type_report(
     date_from: date | None = None,
     date_to: date | None = None,
     franchise_id: str | None = None,
-) -> dict:
+    payment_method: str | None = None) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     if date_from or date_to:
@@ -321,12 +327,14 @@ async def service_type_report(
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
     elif scoped_warehouse_id:
         additional_filters.append(Order.warehouse_id == scoped_warehouse_id)
+    if payment_method:
+        additional_filters.append(Order.payment_method == payment_method)
 
     _, _, opening_revenue = await _resolve_dates_and_opening(
         db, Order, Order.created_at, start_date, end_date, Order.shipping_charge, additional_filters
     )
 
-    filters = _order_filters(scoped_franchise_id, start_date, end_date, scoped_warehouse_id)
+    filters = _order_filters(scoped_franchise_id, start_date, end_date, scoped_warehouse_id, payment_method)
     rows = (
         await db.execute(
             select(

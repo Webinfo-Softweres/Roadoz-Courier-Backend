@@ -87,6 +87,9 @@ class Franchise(Base):
     nearby_landmark: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # pin_codes_covered: Mapped[str | None] = mapped_column(String(500), nullable=True)
     pincode: Mapped[str] = mapped_column(String(6), nullable=False)
+    city: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    state: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     latitude: Mapped[float | None] = mapped_column(DECIMAL(18, 8), nullable=True)
     longitude: Mapped[float | None] = mapped_column(DECIMAL(18, 8), nullable=True)
