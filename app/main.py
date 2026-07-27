@@ -17,6 +17,7 @@ from app.middleware.auth_middleware import RequestLoggingMiddleware, SecurityHea
 from app.routes import auth, franchise, profile, websocket, rbac, order, remittance, invoice,warehouse, activity_log,consigeeauth,coningeereview,webconfiguration,notification
 from app.routes import auth, franchise, profile, websocket, rbac, order, remittance, invoice,warehouse, activity_log,consigeeauth,coningeereview,webconfiguration, analytics,user_admincommunication, rate_calculator, reports, prints, operations, location
 from app.routes import bulk_order, bag,label,user_franchise,consigeeuserorder, month_end_closing
+from app.routes import public as public_routes
 from app.modules.fleet.routes import mobile as fleet_mobile
 from app.modules.fleet.routes import admin as fleet_admin
 from app.modules.fleet.routes import fleet_management
@@ -438,6 +439,7 @@ app.add_middleware(MaintenanceMiddleware)
 
 API_PREFIX = "/api/v1"
 app.include_router(auth.router,      prefix=API_PREFIX)
+app.include_router(public_routes.router, prefix=API_PREFIX)
 app.include_router(franchise.router, prefix=API_PREFIX)
 app.include_router(profile.router,   prefix=API_PREFIX)
 app.include_router(rbac.router,      prefix=API_PREFIX)

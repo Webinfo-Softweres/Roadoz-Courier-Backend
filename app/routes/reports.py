@@ -83,12 +83,13 @@ async def daily_booking_report_endpoint(
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
     franchise_id: str | None = Query(None),
+    payment_method: str | None = Query(None),
     format: str = Query("json"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: User = Depends(require_permission("orders:view")),
 ):
-    data = await daily_booking_report(db, current_user, report_date, date_from, date_to, franchise_id)
+    data = await daily_booking_report(db, current_user, report_date, date_from, date_to, franchise_id, payment_method)
     return format_report_response(data, format)
 
 
@@ -97,12 +98,13 @@ async def customer_wise_booking_report_endpoint(
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
     franchise_id: str | None = Query(None),
+    payment_method: str | None = Query(None),
     format: str = Query("json"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: User = Depends(require_permission("orders:view")),
 ):
-    data = await customer_wise_booking_report(db, current_user, date_from, date_to, franchise_id)
+    data = await customer_wise_booking_report(db, current_user, date_from, date_to, franchise_id, payment_method)
     return format_report_response(data, format)
 
 
@@ -111,12 +113,13 @@ async def service_type_report_endpoint(
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
     franchise_id: str | None = Query(None),
+    payment_method: str | None = Query(None),
     format: str = Query("json"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: User = Depends(require_permission("orders:view")),
 ):
-    data = await service_type_report(db, current_user, date_from, date_to, franchise_id)
+    data = await service_type_report(db, current_user, date_from, date_to, franchise_id, payment_method)
     return format_report_response(data, format)
 
 
