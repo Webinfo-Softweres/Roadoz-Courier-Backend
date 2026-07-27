@@ -275,6 +275,8 @@ class TripSheetRequest(BaseModel):
     is_local: bool = False
     route_city: Optional[List[str]] = []
     destination_city: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
 
 class TripSheetItem(BaseModel):
     sl_no: int

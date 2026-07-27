@@ -35,6 +35,9 @@ class FranchiseCreate(BaseModel):
     preferred_service_area: str
     nearby_landmark: Optional[str] = None
     pincode: str
+    city: str
+    state: str
+    country: str
 
     doc_id_proof: bool = False
     doc_address_proof: bool = False
@@ -78,6 +81,9 @@ class FranchiseUpdate(BaseModel):
     preferred_service_area: Optional[str] = None
     nearby_landmark: Optional[str] = None
     pincode: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
 
     doc_id_proof: Optional[bool] = None
     doc_address_proof: Optional[bool] = None
@@ -126,6 +132,9 @@ class FranchiseResponse(BaseModel):
     preferred_service_area: Optional[str]
     nearby_landmark: Optional[str]
     pincode: Optional[str]
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
 
     doc_id_proof: bool
     doc_address_proof: bool
@@ -150,3 +159,48 @@ class FranchiseListResponse(BaseModel):
     page: int
     limit: int
     pages: int
+
+
+class FranchiseMapItem(BaseModel):
+    id: str
+    name: str
+    email: Optional[str]=None
+    phone: Optional[str]=None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    pincode: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
+    address: Optional[str] = None
+    phone: Optional[str] = None
+    is_active: bool
+
+    model_config = {"from_attributes": True}
+
+
+class FranchiseMapResponse(BaseModel):
+    total: int
+    items: List[FranchiseMapItem]
+
+class FranchisePublicItem(BaseModel):
+       id: str
+       name: str
+       email: Optional[str]=None
+       phone: Optional[str]=None
+       latitude: Optional[float] = None
+       longitude: Optional[float] = None
+       pincode: Optional[str] = None
+       city: Optional[str] = None
+       state: Optional[str] = None
+       country: Optional[str] = None
+       address: Optional[str] = None
+       phone: Optional[str] = None
+       total_orders_count: int = 0
+
+       model_config = {"from_attributes": True}
+
+class FranchisePublicListResponse(BaseModel):
+    total: int
+    items: List[FranchisePublicItem]
+

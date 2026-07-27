@@ -82,6 +82,9 @@ class FranchiseApplicationResponse(BaseModel):
     preferred_service_area: Optional[str] = None
     nearby_landmark: Optional[str] = None
     pincode: str
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
     aadhar_file_path: Optional[str] = None
     pan_file_path: Optional[str] = None
     photo_file_path: Optional[str] = None

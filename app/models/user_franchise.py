@@ -57,6 +57,9 @@ class FranchiseApplicationbyUser(Base):
     preferred_service_area: Mapped[str | None] = mapped_column(String(255), nullable=True)
     nearby_landmark: Mapped[str | None] = mapped_column(String(255), nullable=True)
     pincode: Mapped[str] = mapped_column(String(6), nullable=False, index=True)
+    city: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    state: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(100), nullable=True)
     
     # Documents (file paths)
     aadhar_file_path: Mapped[str | None] = mapped_column(String(500), nullable=True)

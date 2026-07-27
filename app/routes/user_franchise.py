@@ -48,6 +48,9 @@ async def create_franchise_application(
     email: str = Form(...),
     phone: str = Form(...),
     pincode: str = Form(...),
+    city: str = Form(...),
+    state: str = Form(...),
+    country: str = Form(...),
     
     # Optional Fields
     date_of_birth: Optional[date] = Form(None),
@@ -206,6 +209,9 @@ async def create_franchise_application(
         preferred_service_area=preferred_service_area,
         nearby_landmark=nearby_landmark,
         pincode=pincode,
+        city=city,
+        state=state,
+        country=country,
         doc_id_proof=doc_id_proof,
         doc_address_proof=doc_address_proof,
         doc_photographs=doc_photographs,
