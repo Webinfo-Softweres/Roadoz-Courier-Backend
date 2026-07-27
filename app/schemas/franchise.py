@@ -174,6 +174,9 @@ class FranchiseMapItem(BaseModel):
     country: Optional[str] = None
     address: Optional[str] = None
     phone: Optional[str] = None
+    permanent_address : Optional[str] =None
+    detailed_business_address : Optional[str] =None
+    nearby_landmark  : Optional[str] =None
     is_active: bool
 
     model_config = {"from_attributes": True}
@@ -196,6 +199,9 @@ class FranchisePublicItem(BaseModel):
        country: Optional[str] = None
        address: Optional[str] = None
        phone: Optional[str] = None
+       permanent_address : Optional[str] =None
+       detailed_business_address : Optional[str] =None
+       nearby_landmark  : Optional[str] =None
        total_orders_count: int = 0
 
        model_config = {"from_attributes": True}
