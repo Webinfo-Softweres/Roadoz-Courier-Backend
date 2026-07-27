@@ -1,5 +1,3 @@
-from datetime import datetime
-
 from app.models.order import Order
 from app.models.trip_sheet import TripSheet
 from app.modules.fleet.constants import (
@@ -72,10 +70,6 @@ def _progress_label(status: str) -> str | None:
 
 def flatten_sheet_orders(sheet: TripSheet, *, include_delivered: bool = False) -> list[TripListItemOut]:
     items: list[TripListItemOut] = []
-    now = datetime.utcnow()
-    expires_in = None
-    if sheet.offer_expires_at and sheet.driver_status == SHEET_STATUS_PENDING_ACCEPT:
-        expires_in = max(0, int((sheet.offer_expires_at - now).total_seconds()))
 
     for trip_order in sorted(sheet.orders or [], key=lambda x: x.sl_no):
         order = trip_order.order
@@ -102,7 +96,6 @@ def flatten_sheet_orders(sheet: TripSheet, *, include_delivered: bool = False) -
                 tripType="PICKUP_AND_DELIVERY",
                 isExpress=(order.service_type or "").lower() == "express",
                 assignedTime=sheet.created_at,
-                expiresInSeconds=expires_in,
                 pickupLocation=_location_from_pickup(pickup),
                 dropLocation=_location_from_consignee(consignee),
                 earnings=MoneyOut(amount=float(order.total_freight or 0), currency="INR"),

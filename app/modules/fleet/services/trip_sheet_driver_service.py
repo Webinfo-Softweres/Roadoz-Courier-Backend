@@ -13,7 +13,6 @@ from app.modules.fleet.constants import (
     SHEET_STATUS_CANCELLED,
     SHEET_STATUS_COMPLETED,
     SHEET_STATUS_DECLINED,
-    SHEET_STATUS_EXPIRED,
     SHEET_STATUS_IN_PROGRESS,
     SHEET_STATUS_PENDING_ACCEPT,
     TERMINAL_ORDER_STATUSES,
@@ -21,7 +20,6 @@ from app.modules.fleet.constants import (
 from app.modules.fleet.models.driver import Driver
 from app.modules.fleet.schemas.trip_sheet_driver import TripRespondRequest
 from app.modules.fleet.services.trip_sheet_flatten_mapper import flatten_sheet_orders
-from app.modules.fleet.services.trip_sheet_lifecycle import offer_expires_at_from_now
 
 
 async def _load_sheet_for_driver(db: AsyncSession, trip_sheet_id: str, driver: Driver) -> TripSheet:
@@ -39,25 +37,9 @@ async def _load_sheet_for_driver(db: AsyncSession, trip_sheet_id: str, driver: D
     return sheet
 
 
-async def expire_stale_offers(db: AsyncSession, driver: Driver) -> None:
-    now = datetime.utcnow()
-    result = await db.execute(
-        select(TripSheet).where(
-            TripSheet.driver_id == driver.id,
-            TripSheet.driver_status == SHEET_STATUS_PENDING_ACCEPT,
-            TripSheet.offer_expires_at.is_not(None),
-            TripSheet.offer_expires_at < now,
-        )
-    )
-    for sheet in result.scalars().all():
-        sheet.driver_status = SHEET_STATUS_EXPIRED
-    await db.flush()
-
-
 async def list_new_trips(db: AsyncSession, driver: Driver) -> list:
     if not driver.online or driver.onboarding_status != "approved":
         return []
-    await expire_stale_offers(db, driver)
     result = await db.execute(
         select(TripSheet)
         .options(
@@ -77,7 +59,6 @@ async def list_new_trips(db: AsyncSession, driver: Driver) -> list:
 
 
 async def list_active_trips(db: AsyncSession, driver: Driver) -> list:
-    await expire_stale_offers(db, driver)
     result = await db.execute(
         select(TripSheet)
         .options(
@@ -101,12 +82,6 @@ async def respond_to_sheet(
 ) -> dict:
     sheet = await _load_sheet_for_driver(db, trip_sheet_id, driver)
 
-    if sheet.driver_status == SHEET_STATUS_PENDING_ACCEPT and sheet.offer_expires_at:
-        if datetime.utcnow() > sheet.offer_expires_at:
-            sheet.driver_status = SHEET_STATUS_EXPIRED
-            await db.flush()
-            raise HTTPException(status_code=status.HTTP_410_GONE, detail="Trip offer has expired")
-
     if sheet.driver_status != SHEET_STATUS_PENDING_ACCEPT:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Trip sheet is not pending acceptance")
 
@@ -128,7 +103,6 @@ async def respond_to_sheet(
 
     if action == "DECLINE":
         sheet.driver_status = SHEET_STATUS_DECLINED
-        sheet.decline_reason = payload.reason
         sheet.driver_id = None
         await db.flush()
         return {"tripSheetId": sheet.id, "status": "DECLINED"}
@@ -150,7 +124,7 @@ async def get_order_on_driver_sheet(db: AsyncSession, driver: Driver, order_id: 
         .where(
             TripSheet.driver_id == driver.id,
             Order.id == order_id,
-            TripSheet.driver_status.notin_([SHEET_STATUS_DECLINED, SHEET_STATUS_CANCELLED, SHEET_STATUS_EXPIRED]),
+            TripSheet.driver_status.notin_([SHEET_STATUS_DECLINED, SHEET_STATUS_CANCELLED]),
         )
     )
     row = result.first()

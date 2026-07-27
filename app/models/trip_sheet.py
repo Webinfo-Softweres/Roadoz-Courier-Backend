@@ -46,8 +46,6 @@ class TripSheet(Base):
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    offer_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    decline_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # Audit
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)

@@ -46,7 +46,6 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:5173,http://localhost:5174,http://localhost:8000"
 
     LOCATION_RADIUS_METERS: int = 100
-    DRIVER_TRIP_OFFER_EXPIRE_SECONDS: int = 120
 
     @property
     def allowed_origins_list(self) -> List[str]:

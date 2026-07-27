@@ -38,7 +38,6 @@ async def test_apply_driver_assignment_sets_pending_accept():
     apply_driver_assignment_to_trip_sheet(sheet, driver_id, reset=True)
     assert sheet.driver_id == driver_id
     assert sheet.driver_status == SHEET_STATUS_PENDING_ACCEPT
-    assert sheet.offer_expires_at is not None
 
 
 @pytest.mark.asyncio

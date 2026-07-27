@@ -348,16 +348,11 @@ async def generate_trip_sheet(db: AsyncSession, data: "TripSheetRequest", curren
     await db.flush()
 
     if data.driver_id and trip_sheet.driver_status:
-        from app.core.config import settings
         from app.websocket.driver_manager import driver_manager
 
-        expires_in = settings.DRIVER_TRIP_OFFER_EXPIRE_SECONDS
-        if trip_sheet.offer_expires_at:
-            from datetime import datetime
-            expires_in = max(0, int((trip_sheet.offer_expires_at - datetime.utcnow()).total_seconds()))
         await driver_manager.send_to_driver(
             data.driver_id,
-            {"event": "TRIP_ASSIGNED", "payload": {"tripSheetId": trip_sheet.id, "expiresIn": expires_in}},
+            {"event": "TRIP_ASSIGNED", "payload": {"tripSheetId": trip_sheet.id}},
         )
 
     # Send real-time WebSocket notification to the destination franchise
@@ -535,17 +530,11 @@ async def update_trip_sheet(db: AsyncSession, trip_sheet_id: str, data: "TripShe
             {"event": "TRIP_CANCELLED", "payload": {"tripSheetId": trip_sheet.id}},
         )
     if data.driver_id and trip_sheet.driver_status and driver_changed:
-        from app.core.config import settings
         from app.websocket.driver_manager import driver_manager
 
-        expires_in = settings.DRIVER_TRIP_OFFER_EXPIRE_SECONDS
-        if trip_sheet.offer_expires_at:
-            from datetime import datetime
-
-            expires_in = max(0, int((trip_sheet.offer_expires_at - datetime.utcnow()).total_seconds()))
         await driver_manager.send_to_driver(
             data.driver_id,
-            {"event": "TRIP_ASSIGNED", "payload": {"tripSheetId": trip_sheet.id, "expiresIn": expires_in}},
+            {"event": "TRIP_ASSIGNED", "payload": {"tripSheetId": trip_sheet.id}},
         )
 
     return TripSheetResponse(

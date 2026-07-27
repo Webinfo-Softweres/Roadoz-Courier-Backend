@@ -30,8 +30,6 @@ async def _patch_sqlite_dev_schema():
         ("trip_sheets", "accepted_at", "DATETIME"),
         ("trip_sheets", "started_at", "DATETIME"),
         ("trip_sheets", "completed_at", "DATETIME"),
-        ("trip_sheets", "offer_expires_at", "DATETIME"),
-        ("trip_sheets", "decline_reason", "VARCHAR(500)"),
         ("trip_sheets", "updated_at", "DATETIME"),
     ]
     drop_columns = [

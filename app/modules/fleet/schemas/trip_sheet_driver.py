@@ -32,7 +32,6 @@ class TripListItemOut(BaseModel):
     tripType: str = "PICKUP_AND_DELIVERY"
     isExpress: bool = False
     assignedTime: Optional[datetime] = None
-    expiresInSeconds: Optional[int] = None
     pickupLocation: LocationDetailOut
     dropLocation: LocationDetailOut
     estimatedDistance: Optional[str] = None

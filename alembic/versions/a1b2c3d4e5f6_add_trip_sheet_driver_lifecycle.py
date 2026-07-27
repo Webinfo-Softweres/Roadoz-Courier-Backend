@@ -21,8 +21,6 @@ def upgrade() -> None:
     op.add_column("trip_sheets", sa.Column("accepted_at", sa.DateTime(), nullable=True))
     op.add_column("trip_sheets", sa.Column("started_at", sa.DateTime(), nullable=True))
     op.add_column("trip_sheets", sa.Column("completed_at", sa.DateTime(), nullable=True))
-    op.add_column("trip_sheets", sa.Column("offer_expires_at", sa.DateTime(), nullable=True))
-    op.add_column("trip_sheets", sa.Column("decline_reason", sa.String(length=500), nullable=True))
     op.add_column("trip_sheets", sa.Column("updated_at", sa.DateTime(), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False))
     op.create_index("ix_trip_sheets_driver_status", "trip_sheets", ["driver_id", "driver_status"], unique=False)
 
@@ -55,8 +53,6 @@ def downgrade() -> None:
     op.drop_table("driver_payment_collections")
     op.drop_index("ix_trip_sheets_driver_status", table_name="trip_sheets")
     op.drop_column("trip_sheets", "updated_at")
-    op.drop_column("trip_sheets", "decline_reason")
-    op.drop_column("trip_sheets", "offer_expires_at")
     op.drop_column("trip_sheets", "completed_at")
     op.drop_column("trip_sheets", "started_at")
     op.drop_column("trip_sheets", "accepted_at")
