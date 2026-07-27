@@ -182,3 +182,25 @@ class FranchiseMapItem(BaseModel):
 class FranchiseMapResponse(BaseModel):
     total: int
     items: List[FranchiseMapItem]
+
+class FranchisePublicItem(BaseModel):
+       id: str
+       name: str
+       email: Optional[str]=None
+       phone: Optional[str]=None
+       latitude: Optional[float] = None
+       longitude: Optional[float] = None
+       pincode: Optional[str] = None
+       city: Optional[str] = None
+       state: Optional[str] = None
+       country: Optional[str] = None
+       address: Optional[str] = None
+       phone: Optional[str] = None
+       total_orders_count: int = 0
+
+       model_config = {"from_attributes": True}
+
+class FranchisePublicListResponse(BaseModel):
+    total: int
+    items: List[FranchisePublicItem]
+

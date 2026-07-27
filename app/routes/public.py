@@ -10,7 +10,9 @@ from typing import Optional
 
 from app.core.database import get_db
 from app.models.franchise import Franchise
-from app.schemas.franchise import FranchiseMapItem, FranchiseMapResponse
+from app.models.order import Order
+from app.schemas.franchise import FranchiseMapItem, FranchiseMapResponse, FranchisePublicListResponse, FranchisePublicItem
+from sqlalchemy import func
 
 router = APIRouter(prefix="/public", tags=["Public"])
 
@@ -40,3 +42,48 @@ async def get_franchises_for_map(
 
     items = [FranchiseMapItem.model_validate(f) for f in franchises]
     return FranchiseMapResponse(total=len(items), items=items)
+
+
+@router.get("/franchise/list", response_model=FranchisePublicListResponse)
+async def get_public_franchises(
+    state: Optional[str] = Query(None, description="Filter franchises by state"),
+    country: Optional[str] = Query(None, description="Filter franchises by country"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get a list of franchises with their total order count.
+    Can be filtered by state and country.
+    
+    **No authentication required.**
+    """
+    # Create a subquery to count orders per franchise
+    order_counts_subq = (
+        select(Order.franchise_id, func.count(Order.id).label("total_orders_count"))
+        .group_by(Order.franchise_id)
+        .subquery()
+    )
+
+    query = (
+        select(
+            Franchise,
+            func.coalesce(order_counts_subq.c.total_orders_count, 0).label("total_orders_count")
+        )
+        .outerjoin(order_counts_subq, Franchise.id == order_counts_subq.c.franchise_id)
+        .where(Franchise.is_active == True)
+    )
+
+    if state:
+        query = query.where(Franchise.state == state)
+    if country:
+        query = query.where(Franchise.country == country)
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    items = []
+    for franchise, total_orders_count in rows:
+        item_data = FranchisePublicItem.model_validate(franchise).model_dump()
+        item_data["total_orders_count"] = total_orders_count
+        items.append(FranchisePublicItem(**item_data))
+
+    return FranchisePublicListResponse(total=len(items), items=items)
