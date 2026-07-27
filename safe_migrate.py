@@ -98,6 +98,12 @@ def detect_error_type(error_output):
     if "Table" in error_output and "already exists" in error_output:
         return "DUPLICATE_TABLE", None
 
+    if "NoSuchTableError" in error_output or ("Table" in error_output and "doesn't exist" in error_output):
+        return "MISSING_TABLE", None
+        
+    if "Unknown column" in error_output:
+        return "MISSING_COLUMN", None
+
     return "UNKNOWN", None
 
 
@@ -106,7 +112,7 @@ def find_safe_stamp_target(head_rev, error_type):
     Find the safest revision to stamp to.
     - For MISSING_REVISION or BROKEN_CHAIN, we stamp to the baseline revision (oldest in history)
       so that any subsequent migrations get run.
-    - For DUPLICATE_COLUMN or DUPLICATE_TABLE, we stamp to the latest head revision.
+    - For DUPLICATE_COLUMN, DUPLICATE_TABLE, MISSING_TABLE, or MISSING_COLUMN, we stamp to the latest head revision.
     """
     if error_type in ("MISSING_REVISION", "BROKEN_CHAIN"):
         history = get_migration_history()
@@ -155,7 +161,7 @@ def main():
     if error_detail:
         print(f"  Error detail: {error_detail}")
 
-    if error_type in ("MISSING_REVISION", "BROKEN_CHAIN", "DUPLICATE_COLUMN", "DUPLICATE_TABLE"):
+    if error_type in ("MISSING_REVISION", "BROKEN_CHAIN", "DUPLICATE_COLUMN", "DUPLICATE_TABLE", "MISSING_TABLE", "MISSING_COLUMN"):
         target = find_safe_stamp_target(head, error_type)
         print(f"\n-- Auto-fixing: stamping database to {target} --")
         print("  This aligns Alembic version history and resolves errors.")
