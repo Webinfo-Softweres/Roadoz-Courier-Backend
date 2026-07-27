@@ -1,7 +1,7 @@
 """Add trip sheet driver lifecycle columns and driver payment collections
 
 Revision ID: a1b2c3d4e5f6
-Revises: 777d33343dcb
+Revises: f6a6b3065741
 Create Date: 2026-07-27
 
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "a1b2c3d4e5f6"
-down_revision: Union[str, None] = "777d33343dcb"
+down_revision: Union[str, None] = "f6a6b3065741"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
