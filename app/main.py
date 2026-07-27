@@ -411,20 +411,36 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 # ── Middleware ───────────────────────────────────────────────────────────────
 
 
-origins = [
+DEFAULT_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:3001",
+    "http://localhost:3002",
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://localhost:8000",
+    "http://localhost:8080",
+    "http://localhost:8081",
     "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://127.0.0.1:5173",
     "https://www.roadozcourier.com",
     "https://roadozcourier.com",
     "https://admin.roadozcourier.com",
     "https://staging.roadozcourier.com",
-    "https://staging-admin.roadozcourier.com"
+    "https://staging-admin.roadozcourier.com",
 ]
+
+all_origins = set(DEFAULT_ORIGINS)
+for origin in settings.allowed_origins_list:
+    if origin and origin.strip():
+        all_origins.add(origin.strip())
+
+origins = list(all_origins)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
