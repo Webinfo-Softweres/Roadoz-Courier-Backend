@@ -707,3 +707,32 @@ async def get_order_detail(
     }
     
     return response
+
+class CustomerEmailRequest(BaseModel):
+    customer_email: str
+    subject: str
+    body: str
+
+@router.post("/send-email")
+async def send_customer_email(request: CustomerEmailRequest):
+    from app.utils.smtp import send_email
+    target_email = "sreejeshmattannoor4203@gmail.com"
+    html_body = f"""
+    <html>
+    <body>
+        <p><strong>New message from:</strong> {request.customer_email}</p>
+        <hr>
+        <p>{request.body}</p>
+    </body>
+    </html>
+    """
+    success = await send_email(
+        to_email=target_email,
+        subject=request.subject,
+        body=html_body,
+        reply_to=request.customer_email
+    )
+    if success:
+        return {"message": f"Email sent successfully"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to send email")
