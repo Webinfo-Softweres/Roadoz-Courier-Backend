@@ -13,6 +13,11 @@ from app.models.franchise import Franchise
 from app.models.order import Order
 from app.schemas.franchise import FranchiseMapItem, FranchiseMapResponse, FranchisePublicListResponse, FranchisePublicItem
 from sqlalchemy import func
+from collections import defaultdict
+from app.models.rate_master import RateMaster
+
+
+
 
 router = APIRouter(prefix="/public", tags=["Public"])
 
@@ -87,3 +92,16 @@ async def get_public_franchises(
         items.append(FranchisePublicItem(**item_data))
 
     return FranchisePublicListResponse(total=len(items), items=items)
+
+
+
+
+@router.get("/rate-master")
+async def get_public_rate_master(
+    db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(RateMaster).order_by(RateMaster.service_type,RateMaster.zone,RateMaster.weight_up_to))
+    rates = result.scalars().all()
+    data = {"Surface": defaultdict(list),"Express": defaultdict(list)}
+    for rate in rates:
+        data[rate.service_type][rate.zone].append({"id": rate.id,"weight_up_to": float(rate.weight_up_to),"base_rate": float(rate.base_rate),})
+    return {"Surface": dict(data["Surface"]),"Express": dict(data["Express"])}
