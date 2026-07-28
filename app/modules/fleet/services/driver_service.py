@@ -7,7 +7,7 @@ from app.models.user import User
 from app.modules.fleet.models.driver import Driver
 from app.modules.fleet.models.fleet_file import FleetFile
 from app.modules.fleet.models.payout_account import DriverPayoutAccount
-from app.modules.fleet.schemas.admin import DriverDetailOut, DriverListItem, DriverListResponse
+from app.modules.fleet.schemas.admin import ApproveDriverRequest, DriverDetailOut, DriverListItem, DriverListResponse
 from app.modules.fleet.services.file_service import ALLOWED_DOCUMENT_TYPES
 
 
@@ -105,7 +105,12 @@ async def get_driver_detail(db: AsyncSession, current_user: User, driver_id: str
     )
 
 
-async def approve_driver(db: AsyncSession, current_user: User, driver_id: str) -> Driver:
+async def approve_driver(
+    db: AsyncSession,
+    current_user: User,
+    driver_id: str,
+    payload: ApproveDriverRequest | None = None,
+) -> Driver:
     driver = await get_driver_by_id(db, current_user, driver_id)
     if not driver:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver not found")
@@ -139,7 +144,13 @@ async def approve_driver(db: AsyncSession, current_user: User, driver_id: str) -
         # Franchise user approving → assign to their franchise
         franchise_id = caller_franchise_id
         warehouse_id = None
-    # else: Admin approving unassigned driver — use whatever was passed in the payload (can be None)
+    elif payload and payload.warehouse_id:
+        warehouse_id = payload.warehouse_id
+        franchise_id = payload.franchise_id
+    elif payload and payload.franchise_id:
+        franchise_id = payload.franchise_id
+        warehouse_id = None
+    # else: Admin approving unassigned driver with no payload — leave unassigned
 
     driver.onboarding_status = "approved"
     driver.status = "active"
