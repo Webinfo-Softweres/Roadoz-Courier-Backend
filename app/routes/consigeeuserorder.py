@@ -707,3 +707,65 @@ async def get_order_detail(
     }
     
     return response
+from pydantic import BaseModel, EmailStr
+
+
+class CustomerEmailRequest(BaseModel):
+    full_name: str
+    customer_email: EmailStr
+    phone_number: str
+    inquiry_type: str
+    subject: str
+    message: str
+    
+
+@router.post("/send-email")
+async def send_customer_email(request: CustomerEmailRequest):
+    from app.utils.smtp import send_email
+    target_email = "sreejeshmattannoor4203@gmail.com"
+    html_body = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif;">
+        <h2>📩 New Contact Form Submission</h2>
+        <table cellpadding="8" cellspacing="0" border="1" style="border-collapse: collapse;">
+            <tr>
+                <td><strong>Full Name</strong></td>
+                <td>{request.full_name}</td>
+            </tr>
+            <tr>
+                <td><strong>Email</strong></td>
+                <td>{request.customer_email}</td>
+            </tr>
+            <tr>
+                <td><strong>Phone Number</strong></td>
+                <td>{request.phone_number}</td>
+            </tr>
+            <tr>
+                <td><strong>Inquiry Type</strong></td>
+                <td>{request.inquiry_type}</td>
+            </tr>
+            <tr>
+                <td><strong>Subject</strong></td>
+                <td>{request.subject}</td>
+            </tr>
+        </table>
+        <br>
+        <h3>Message</h3>
+        <p>{request.message}</p>
+        <hr>
+        <p>
+            <strong>Reply directly to this email</strong> to respond to
+            <strong>{request.customer_email}</strong>.
+        </p>
+    </body>
+    </html>
+    """
+    success = await send_email(
+        to_email=target_email,
+        subject=f"Contact Form - {request.subject}",
+        body=html_body,
+        reply_to=request.customer_email,
+    )
+    if success:
+        return {"message": "Email sent successfully"}
+    raise HTTPException(status_code=500, detail="Failed to send email")

@@ -50,3 +50,27 @@ async def send_email_otp(to_email: str, otp: str, purpose: str = "login") -> boo
     except Exception as e:
         logger.error(f"Failed to send email OTP: {e}")
         return False
+
+async def send_email(to_email: str, subject: str, body: str, reply_to: str = None) -> bool:
+    """Send generic email via SMTP."""
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = settings.SMTP_FROM or settings.SMTP_USERNAME
+        msg["To"] = to_email
+        
+        if reply_to:
+            msg["Reply-To"] = reply_to
+            
+        msg.attach(MIMEText(body, "html"))
+
+        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+            server.starttls()
+            server.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
+            server.sendmail(msg["From"], to_email, msg.as_string())
+
+        logger.info(f"Email sent to {to_email}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send email: {e}")
+        return False
