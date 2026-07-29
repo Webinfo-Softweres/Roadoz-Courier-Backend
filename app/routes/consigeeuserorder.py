@@ -17,6 +17,8 @@ from app.models.franchise import Franchise, OrderFranchiseAddress
 from app.schemas.consigeeuserorder import PickupAddressResponse,ConsigneeResponse,WarehouseAddressResponse,FranchiseAddressResponse,ItemResponse,PackageResponse,WeightSummaryResponse,OrderListResponse,PaginatedOrdersResponse
 from app.routes.order import PickupToConsignees,WarehouseToDelivery,FranchiseToDelivery,ConsigneeToDelivery
 from app.models.consigeereview import ProductReview, ReviewStatus
+from app.models.delivery_assignment import DeliveryAssignment
+from app.models.order import OrderStatus
 
 
 
@@ -57,6 +59,13 @@ def build_tracking_history(order) -> List[dict]:
             "pincode": order.consignee.pincode if order.consignee else None,
             "timestamp": order.updated_at
         })
+    elif order.status == OrderStatus.OUT_FOR_DELIVERY.value:
+        tracking_history.append({
+            "stage": "Delivery",
+            "status": "Out_for_delivery",
+            "pincode": order.consignee.pincode if order.consignee else None,
+            "timestamp": order.updated_at
+        })
     else:
         # Add current status as delivery stage
         tracking_history.append({
@@ -89,7 +98,7 @@ async def get_my_orders(
     consignee_result = await db.execute(
         select(Consignee).where(Consignee.email == current_user.email)
     )
-    consignee = consignee_result.scalar_one_or_none()
+    consignee = consignee_result.scalars().first()
     
     if not consignee:
         raise HTTPException(
@@ -196,7 +205,7 @@ async def get_my_orders(
                 franchise_addresses.append(FranchiseAddressResponse(
                     name=franchise.name,
                     pincode=franchise.pincode,
-                    city=franchise.city if hasattr(franchise, 'city') else ""
+                    city=getattr(franchise, 'city', "") or ""
                 ))
         
         # Items
@@ -293,7 +302,7 @@ async def get_order_detail(
     consignee_result = await db.execute(
         select(Consignee).where(Consignee.email == current_user.email)
     )
-    consignee = consignee_result.scalar_one_or_none()
+    consignee = consignee_result.scalars().first()
     
     if not consignee:
         raise HTTPException(
@@ -357,6 +366,14 @@ async def get_order_detail(
         .order_by(ConsigneeToDelivery.created_at)
     )
     delivery_scans = delivery_scans.scalars().all()
+    
+    # Get Delivery Assignment
+    delivery_assignment = await db.execute(
+        select(DeliveryAssignment)
+        .where(DeliveryAssignment.order_id == order.id, DeliveryAssignment.status != "cancelled")
+        .order_by(desc(DeliveryAssignment.created_at))
+    )
+    delivery_assignment = delivery_assignment.scalars().first()
     
     # ========== BUILD TRACKING HISTORY FROM ACTUAL SCANS ==========
     
@@ -464,17 +481,81 @@ async def get_order_detail(
             "scan_type": "franchise"
         })
     
+    # 4.5 OUT FOR DELIVERY (Delivery Assignment)
+    if delivery_assignment:
+        origin_location = None
+        origin_address = None
+        origin_city = None
+        origin_state = None
+        origin_pincode = None
+        origin_name = None
+        origin_phone = None
+        
+        if delivery_assignment.franchise:
+            origin_name = delivery_assignment.franchise.name
+            origin_city = getattr(delivery_assignment.franchise, 'city', "") or ""
+            origin_location = origin_city or getattr(delivery_assignment.franchise, 'preferred_service_area', "")
+            origin_address = getattr(delivery_assignment.franchise, 'address', None)
+            origin_state = getattr(delivery_assignment.franchise, 'state', None)
+            origin_pincode = delivery_assignment.franchise.pincode
+            origin_phone = getattr(delivery_assignment.franchise, 'phone', None)
+        elif delivery_assignment.warehouse:
+            origin_name = delivery_assignment.warehouse.nickname
+            origin_city = delivery_assignment.warehouse.city
+            origin_location = origin_city
+            origin_address = delivery_assignment.warehouse.address_line_1
+            origin_state = delivery_assignment.warehouse.state
+            origin_pincode = delivery_assignment.warehouse.pincode
+            origin_phone = delivery_assignment.warehouse.phone
+
+        tracking_history.append({
+            "stage": "Delivery",
+            "status": "Out_for_delivery",
+            "status_display": "Out for Delivery",
+            "description": f"Order is out for delivery to {order.consignee.name if order.consignee else 'customer'}",
+            "location": origin_location,
+            "address": origin_address,
+            "city": origin_city,
+            "state": origin_state,
+            "pincode": origin_pincode,
+            "contact_name": origin_name,
+            "contact_phone": origin_phone,
+            "timestamp": delivery_assignment.created_at,
+            "formatted_date": delivery_assignment.created_at.strftime("%d %b %Y, %I:%M %p") if delivery_assignment.created_at else None,
+            "is_current": (order.status == OrderStatus.OUT_FOR_DELIVERY.value and len(delivery_scans) == 0),
+            "icon": "🚚",
+            "scan_id": delivery_assignment.id,
+            "scan_type": "delivery_assignment"
+        })
+    
     # 5. DELIVERY SCANS
     for idx, scan in enumerate(delivery_scans):
         consignee = order.consignee
         
+        status_display = scan.status
+        description = f"Delivery update: {scan.status}"
+        icon = "🚚"
+        
+        if scan.status.lower() in ["out_for_delivery", "ofd", "out_of_delivery"]:
+            status_display = "Out for Delivery"
+            description = f"Order is out for delivery to {consignee.name if consignee else 'customer'}"
+            icon = "🚚"
+        elif scan.status.lower() in ["delivered"]:
+            status_display = "Delivered Successfully"
+            description = f"Order delivered to {consignee.name if consignee else 'customer'}"
+            icon = "✅"
+        elif scan.status.lower() in ["failed", "undelivered", "rto", "attempted"]:
+            status_display = "Delivery Attempt Failed"
+            description = f"Delivery attempt failed"
+            icon = "⚠️"
+            
         tracking_history.append({
             "stage": "Delivery",
-            "status": "Delivered",
-            "status_display": "Delivered Successfully",
-            "description": f"Order delivered to {consignee.name if consignee else 'customer'}",
+            "status": scan.status,
+            "status_display": status_display,
+            "description": description,
             "location": consignee.city if consignee else scan.pincode,
-            "address": f"{consignee.address_line_1} {consignee.address_line_2 or ''}" if consignee else None,
+            "address": f"{consignee.address_line_1} {consignee.address_line_2 or ''}".strip() if consignee else None,
             "city": consignee.city if consignee else None,
             "state": consignee.state if consignee else None,
             "pincode": scan.pincode,
@@ -482,8 +563,8 @@ async def get_order_detail(
             "contact_phone": consignee.mobile if consignee else None,
             "timestamp": scan.created_at,
             "formatted_date": scan.created_at.strftime("%d %b %Y, %I:%M %p") if scan.created_at else None,
-            "is_current": True,
-            "icon": "✅",
+            "is_current": (idx == len(delivery_scans) - 1),
+            "icon": icon,
             "scan_id": scan.id,
             "scan_type": "delivery"
         })
@@ -606,8 +687,8 @@ async def get_order_detail(
             response["franchise_addresses"].append({
                 "name": franchise.name,
                 "pincode": franchise.pincode,
-                "city": franchise.city if hasattr(franchise, 'city') else "",
-                "address": franchise.address if hasattr(franchise, 'address') else None
+                "city": getattr(franchise, 'city', "") or "",
+                "address": getattr(franchise, 'address', None)
             })
     
     # Items

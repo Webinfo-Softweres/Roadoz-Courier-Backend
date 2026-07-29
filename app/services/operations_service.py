@@ -263,6 +263,46 @@ async def generate_trip_sheet(db: AsyncSession, data: "TripSheetRequest", curren
             detail=f"The following orders are not under your franchise/warehouse or do not exist: {missing}"
         )
 
+    # Filter out already In-Transit or terminal orders, instead of throwing an error
+    # This prevents them from being added to the new trip sheet
+    invalid_statuses = {
+        OrderStatus.IN_TRANSIT.value,
+        OrderStatus.DELIVERED.value,
+        OrderStatus.RETURNED.value,
+        OrderStatus.CANCELLED.value
+    }
+    valid_orders = [o for o in orders if o.status not in invalid_statuses]
+    
+    if not valid_orders:
+        raise HTTPException(
+            status_code=400,
+            detail="None of the provided orders could be added to the trip sheet (they are already in transit or completed)."
+        )
+        
+    orders = valid_orders  # Proceed with only the valid ones
+    valid_order_ids = [o.id for o in orders]
+
+    # Check which orders already have records in DB
+    already_picked_order_ids = set()
+    already_intransit_order_ids = set()
+
+    # 1. Pickup models
+    from app.models.order import PickupToConsignees, FranchiseToDelivery, WarehouseToDelivery
+    p_picked = (await db.execute(select(PickupToConsignees.order_id).where(PickupToConsignees.order_id.in_(valid_order_ids)))).scalars().all()
+    already_picked_order_ids.update(p_picked)
+    
+    f_picked = (await db.execute(select(FranchiseToDelivery.order_id).where(FranchiseToDelivery.order_id.in_(valid_order_ids)))).scalars().all()
+    already_picked_order_ids.update(f_picked)
+    
+    w_picked = (await db.execute(select(WarehouseToDelivery.order_id).where(WarehouseToDelivery.order_id.in_(valid_order_ids)))).scalars().all()
+    already_picked_order_ids.update(w_picked)
+
+    # 2. In Transit model
+    from app.models.order_intransit import OrderInTransit
+    intransit = (await db.execute(select(OrderInTransit.order_id).where(OrderInTransit.order_id.in_(valid_order_ids)))).scalars().all()
+    already_intransit_order_ids.update(intransit)
+
+
 
     items = []
     topay_freight = 0.0
@@ -278,6 +318,34 @@ async def generate_trip_sheet(db: AsyncSession, data: "TripSheetRequest", curren
     
     trip_sheet_id = str(uuid.uuid4())
     trip_sheet_orders = []
+
+    trip_sheet = TripSheet(
+        id=trip_sheet_id,
+        franchise_id=franchise_id,
+        warehouse_id=warehouse_id,
+        destination_franchise_id=data.destination_franchise_id,
+        route_franchise_ids=data.route_franchise_ids,
+        is_local=data.is_local,
+        route_city=data.route_city,
+        destination_city=data.destination_city,
+        driver_id=data.driver_id,
+        vehicle_id=data.vehicle_id,
+        topay_freight=0.0,
+        topay_packages=0,
+        credit_freight=0.0,
+        credit_packages=0,
+        cod_freight=0.0,
+        cod_packages=0,
+        prepaid_freight=0.0,
+        prepaid_packages=0,
+        total_freight=0.0,
+        total_packages=0,
+        created_by=current_user.id,
+    )
+    from app.modules.fleet.services.trip_sheet_lifecycle import apply_driver_assignment_to_trip_sheet
+    apply_driver_assignment_to_trip_sheet(trip_sheet, data.driver_id, reset=True)
+    db.add(trip_sheet)
+    await db.flush()
 
     from app.utils.location import haversine_distance
     from app.core.config import settings
@@ -340,30 +408,74 @@ async def generate_trip_sheet(db: AsyncSession, data: "TripSheetRequest", curren
             )
         )
         
-        # Status Update Logic using lat/long distance
-        if data.lat and data.lng:
-            if order.status not in [OrderStatus.PICKED.value, OrderStatus.IN_TRANSIT.value, OrderStatus.DELIVERED.value, OrderStatus.RETURNED.value, OrderStatus.CANCELLED.value]:
-                # Check distance to pickup
+        # ─── Status Update Logic ───────────────────────────────────
+        # • If order id not in already_picked_order_ids:
+        #     1. Record Picked scan based on location
+        #     2. Send Picked Notification
+        # • If order id not in already_intransit_order_ids:
+        #     1. Record OrderInTransit
+        #     2. Send InTransit Notification
+        # ──────────────────────────────────────────────────────────────
+
+        terminal_statuses = [
+            OrderStatus.IN_TRANSIT.value,
+            OrderStatus.DELIVERED.value,
+            OrderStatus.RETURNED.value,
+            OrderStatus.CANCELLED.value,
+        ]
+
+        if order.status not in terminal_statuses:
+            # ── STEP 1: Record Picked scan (only if not already picked in DB) ──
+            if order.id not in already_picked_order_ids:
                 pickup = order.pickup_address
-                pickup_dist = float('inf')
-                if pickup and pickup.latitude and pickup.longitude:
-                    pickup_dist = haversine_distance(data.lat, data.lng, pickup.latitude, pickup.longitude)
+                scan_recorded = False
 
-                sender_dist = float('inf')
-                if sender_lat and sender_lng:
-                    sender_dist = haversine_distance(data.lat, data.lng, sender_lat, sender_lng)
+                if data.lat and data.lng:
+                    pickup_dist = float('inf')
+                    sender_dist = float('inf')
 
-                if pickup_dist <= settings.LOCATION_RADIUS_METERS:
-                    order.previous_status = order.status
-                    order.status = OrderStatus.PICKED.value
-                    pickup_entry = PickupToConsignees(
-                        pincode=pickup.pincode if pickup.pincode else sender_pincode,
-                        status=OrderStatus.PICKED.value,
-                        order_id=order.id,
-                        pickup_addresses_id=pickup.id,
-                        user_id=current_user.id
-                    )
-                    db.add(pickup_entry)
+                    if pickup and pickup.latitude and pickup.longitude:
+                        pickup_dist = haversine_distance(
+                            data.lat, data.lng, pickup.latitude, pickup.longitude
+                        )
+                    if sender_lat and sender_lng:
+                        sender_dist = haversine_distance(
+                            data.lat, data.lng, sender_lat, sender_lng
+                        )
+
+                    if pickup_dist <= settings.LOCATION_RADIUS_METERS:
+                        # Scanned from pickup address location
+                        db.add(PickupToConsignees(
+                            pincode=pickup.pincode if pickup.pincode else sender_pincode,
+                            status=OrderStatus.PICKED.value,
+                            order_id=order.id,
+                            pickup_addresses_id=pickup.id,
+                            user_id=current_user.id
+                        ))
+                        scan_recorded = True
+
+                    elif sender_dist <= settings.LOCATION_RADIUS_METERS:
+                        # Scanned from franchise or warehouse location
+                        if franchise_id:
+                            db.add(FranchiseToDelivery(
+                                pincode=sender_pincode,
+                                status=OrderStatus.PICKED.value,
+                                order_id=order.id,
+                                franchise_addresses_id=franchise_id,
+                                user_id=current_user.id
+                            ))
+                        elif warehouse_id:
+                            db.add(WarehouseToDelivery(
+                                pincode=sender_pincode,
+                                status=OrderStatus.PICKED.value,
+                                order_id=order.id,
+                                warehouse_addresses_id=warehouse_id,
+                                user_id=current_user.id
+                            ))
+                        scan_recorded = True
+
+                # Send notification ONLY if we successfully recorded a scan
+                if scan_recorded:
                     await create_notification(
                         db=db,
                         title="Order Picked",
@@ -371,90 +483,44 @@ async def generate_trip_sheet(db: AsyncSession, data: "TripSheetRequest", curren
                         type="order",
                         order_id=order.id,
                     )
-                elif sender_dist <= settings.LOCATION_RADIUS_METERS:
-                    order.previous_status = order.status
-                    order.status = OrderStatus.PICKED.value
-                    if franchise_id:
-                        entry = FranchiseToDelivery(
-                            pincode=sender_pincode,
-                            status=OrderStatus.PICKED.value,
-                            order_id=order.id,
-                            franchise_addresses_id=franchise_id,
-                            user_id=current_user.id
-                        )
-                        db.add(entry)
-                    elif warehouse_id:
-                        entry = WarehouseToDelivery(
-                            pincode=sender_pincode,
-                            status=OrderStatus.PICKED.value,
-                            order_id=order.id,
-                            warehouse_addresses_id=warehouse_id,
-                            user_id=current_user.id
-                        )
-                        db.add(entry)
-                    await create_notification(
-                        db=db,
-                        title="Order Picked",
-                        message=f"Order {order.order_number} picked successfully",
-                        type="order",
-                        order_id=order.id,
-                    )
 
-        if order.status != OrderStatus.IN_TRANSIT.value and order.status not in [OrderStatus.DELIVERED.value, OrderStatus.RETURNED.value, OrderStatus.CANCELLED.value]:
-            order.previous_status = order.status
-            order.status = OrderStatus.IN_TRANSIT.value
-            order.updated_at = indian_time()
+            # ── STEP 2: Promote to In Transit (only if not already in DB) ──
+            if order.id not in already_intransit_order_ids:
+                order.previous_status = order.status
+                order.status = OrderStatus.IN_TRANSIT.value
+                order.updated_at = indian_time()
 
-            # Store in-transit event in dedicated OrderInTransit model
-            intransit_entry = OrderInTransit(
-                order_id=order.id,
-                trip_sheet_id=trip_sheet_id,
-                status=OrderStatus.IN_TRANSIT.value,
-                latitude=data.lat if data.lat else None,
-                longitude=data.lng if data.lng else None,
-                pincode=sender_pincode,
-                franchise_id=franchise_id,
-                warehouse_id=warehouse_id,
-                dispatched_by=current_user.id
-            )
-            db.add(intransit_entry)
-                
-            await create_notification(
-                db=db,
-                title="Order In Transit",
-                message=f"Order {order.order_number} is now in transit",
-                type="order",
-                order_id=order.id,
-            )
+                db.add(OrderInTransit(
+                    order_id=order.id,
+                    trip_sheet_id=trip_sheet_id,
+                    status=OrderStatus.IN_TRANSIT.value,
+                    latitude=data.lat if data.lat else None,
+                    longitude=data.lng if data.lng else None,
+                    pincode=sender_pincode,
+                    franchise_id=franchise_id,
+                    warehouse_id=warehouse_id,
+                    dispatched_by=current_user.id
+                ))
+
+                await create_notification(
+                    db=db,
+                    title="Order In Transit",
+                    message=f"Order {order.order_number} is now in transit",
+                    type="order",
+                    order_id=order.id,
+                )
         
-    trip_sheet = TripSheet(
-        id=trip_sheet_id,
-        franchise_id=franchise_id,
-        warehouse_id=warehouse_id,
-        destination_franchise_id=data.destination_franchise_id,
-        route_franchise_ids=data.route_franchise_ids,
-        is_local=data.is_local,
-        route_city=data.route_city,
-        destination_city=data.destination_city,
-        driver_id=data.driver_id,
-        vehicle_id=data.vehicle_id,
-        topay_freight=topay_freight,
-        topay_packages=topay_packages,
-        credit_freight=credit_freight,
-        credit_packages=credit_packages,
-        cod_freight=cod_freight,
-        cod_packages=cod_packages,
-        prepaid_freight=prepaid_freight,
-        prepaid_packages=prepaid_packages,
-        total_freight=total_freight,
-        total_packages=total_packages,
-        created_by=current_user.id,
-    )
-    from app.modules.fleet.services.trip_sheet_lifecycle import apply_driver_assignment_to_trip_sheet
+    trip_sheet.topay_freight = topay_freight
+    trip_sheet.topay_packages = topay_packages
+    trip_sheet.credit_freight = credit_freight
+    trip_sheet.credit_packages = credit_packages
+    trip_sheet.cod_freight = cod_freight
+    trip_sheet.cod_packages = cod_packages
+    trip_sheet.prepaid_freight = prepaid_freight
+    trip_sheet.prepaid_packages = prepaid_packages
+    trip_sheet.total_freight = total_freight
+    trip_sheet.total_packages = total_packages
 
-    apply_driver_assignment_to_trip_sheet(trip_sheet, data.driver_id, reset=True)
-    
-    db.add(trip_sheet)
     db.add_all(trip_sheet_orders)
     await db.flush()
 
