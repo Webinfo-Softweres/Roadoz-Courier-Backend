@@ -17,6 +17,9 @@ from app.middleware.auth_middleware import RequestLoggingMiddleware, SecurityHea
 from app.routes import auth, franchise, profile, websocket, rbac, order, remittance, invoice,warehouse, activity_log,consigeeauth,coningeereview,webconfiguration,notification
 from app.routes import auth, franchise, profile, websocket, rbac, order, remittance, invoice,warehouse, activity_log,consigeeauth,coningeereview,webconfiguration, analytics,user_admincommunication, rate_calculator, reports, prints, operations, location
 from app.routes import bulk_order, bag,label,user_franchise,consigeeuserorder, month_end_closing
+from app.routes import pickup_assignment as pickup_assignment_routes
+from app.routes import delivery_assignment as delivery_assignment_routes
+
 from app.routes import public as public_routes
 from app.modules.fleet.routes import mobile as fleet_mobile
 from app.modules.fleet.routes.driver_runtime import router as fleet_driver_runtime
@@ -173,6 +176,12 @@ DEFAULT_PERMISSIONS = [
     ("tripsheet", "view", "View trip sheets"),
     ("tripsheet", "update", "Update trip sheets"),
     ("tripsheet", "delete", "Delete trip sheets"),
+    # Pickup Assignment
+    ("pickup_assignment", "create", "Create pickup assignments"),
+    ("pickup_assignment", "view", "View pickup assignments"),
+    # Delivery Assignment
+    ("delivery_assignment", "create", "Create delivery assignments"),
+    ("delivery_assignment", "view", "View delivery assignments"),
 
 ]
 
@@ -489,6 +498,9 @@ app.include_router(label.router,prefix=API_PREFIX)
 app.include_router(user_franchise.router,prefix=API_PREFIX)
 app.include_router(consigeeuserorder.router,prefix=API_PREFIX)
 app.include_router(month_end_closing.router,prefix=API_PREFIX)
+app.include_router(pickup_assignment_routes.router, prefix=API_PREFIX)
+app.include_router(delivery_assignment_routes.router, prefix=API_PREFIX)
+
 app.include_router(fleet_mobile.router)
 app.include_router(fleet_driver_runtime)
 app.include_router(driver_ws_router, prefix=API_PREFIX)

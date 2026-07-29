@@ -22,6 +22,7 @@ class OrderStatus(str, Enum):
     IN_TRANSIT = "In_transit"
     NDR = "Ndr"
     OFD = "Ofd"
+    OUT_FOR_DELIVERY = "Out_for_delivery"
     DELIVERED = "Delivered"
     RTO_IN_TRANSIT = "Rto_in_transit"
     RTO_DELIVERED = "Rto_delivered"
@@ -30,7 +31,7 @@ class OrderStatus(str, Enum):
     LOST = "Lost"
     PICKED = "Picked"           
     DISPATCHED = "Dispatched"
-    WAREHOUSE="Warehouse"
+    WAREHOUSE = "Warehouse"
      
 
 class BulkOrder(Base):
