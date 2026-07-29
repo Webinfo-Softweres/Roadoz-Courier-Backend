@@ -829,6 +829,10 @@ async def get_trip_sheet_franchises(db: AsyncSession, current_user: User, name: 
         filters.append(Franchise.pincode.ilike(f"%{pincode}%"))
     if permanent_address:
         filters.append(Franchise.permanent_address.ilike(f"%{permanent_address}%"))
+        
+    current_franchise_id = await _resolve_franchise_id(db, current_user)
+    if current_franchise_id:
+        filters.append(Franchise.id != current_franchise_id)
     
     # We should return all franchises to allow choosing a destination
     query = select(Franchise)
