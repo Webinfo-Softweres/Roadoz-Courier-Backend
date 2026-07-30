@@ -168,6 +168,11 @@ async def get_available_franchises(
 
 @router.get("/my-pickup-addresses", response_model=List[PickupAddressResponse])
 async def get_my_pickup_addresses(
+    country: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    city: Optional[str] = Query(None),
+    pincode: Optional[str] = Query(None),
+    nickname: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: AuthUser = Depends(get_current_user)
 ):
@@ -180,6 +185,20 @@ async def get_my_pickup_addresses(
             PickupAddress.email == current_user.email
         )
     )
+    if country:
+        query = query.where(PickupAddress.country.ilike(f"%{country}%"))
+
+    if state:
+        query = query.where(PickupAddress.state.ilike(f"%{state}%"))
+
+    if city:
+        query = query.where(PickupAddress.city.ilike(f"%{city}%"))
+
+    if pincode:
+        query = query.where(PickupAddress.pincode == pincode)
+
+    if nickname:
+        query = query.where(PickupAddress.nickname.ilike(f"%{nickname}%"))
     result = await db.execute(query)
     addresses = result.scalars().all()
     
@@ -205,6 +224,11 @@ async def get_my_pickup_addresses(
 
 @router.get("/my-consignees", response_model=List[ConsigneeResponse])
 async def get_my_consignees(
+    name: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    city: Optional[str] = Query(None),
+    pincode: Optional[str] = Query(None),
+    mobile: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: AuthUser = Depends(get_current_user)
 ):
@@ -217,6 +241,20 @@ async def get_my_consignees(
             Consignee.email == current_user.email
         )
     )
+    if name:
+        query = query.where(Consignee.name.ilike(f"%{name}%"))
+    if state:
+        query = query.where(Consignee.state.ilike(f"%{state}%"))
+
+    if city:
+        query = query.where(Consignee.city.ilike(f"%{city}%"))
+
+    if pincode:
+        query = query.where(Consignee.pincode == pincode)
+
+    if mobile:
+        query = query.where(Consignee.mobile.ilike(f"%{mobile}%"))
+
     result = await db.execute(query)
     consignees = result.scalars().all()
     
@@ -234,7 +272,7 @@ async def get_my_consignees(
             state=c.state,
             status=c.status,
             created_at=c.created_at,
-            updated_at=c.updated_at
+            updated_at=c.updated_at,
         ) for c in consignees
     ]
 
@@ -1381,8 +1419,8 @@ async def create_consignee_order(
         amount=data.amount,
         insurance=(round(data.order_value * 0.018, 2) if data.insurance else 0.0),
         regional_area=data.regional_area,
-        status=OrderStatus.PAYMENT_PENDING.value if data.payment_method.value == "To Pay" else OrderStatus.PENDING_APPROVAL.value,
-        previous_status=OrderStatus.PAYMENT_PENDING.value if data.payment_method.value == "To Pay" else OrderStatus.PENDING_APPROVAL.value,
+        status=OrderStatus.PAYMENT_PENDING.value if data.payment_method.value == "Prepaid" else OrderStatus.PENDING_APPROVAL.value,
+        previous_status=OrderStatus.PAYMENT_PENDING.value if data.payment_method.value == "Prepaid" else OrderStatus.PENDING_APPROVAL.value,
         created_by=franchise.user_id, # Link to franchise owner's user ID
         franchise_id=franchise.id,
         warehouse_id=None
@@ -1475,8 +1513,8 @@ async def create_consignee_order(
     razorpay_order_id = None
     razorpay_key_id = None
 
-    if data.payment_method.value == "To Pay":
-        # To Pay = customer pays freight online via Razorpay
+    if data.payment_method.value == "Prepaid":
+        # Prepaid = customer pays freight online via Razorpay
         try:
             rz_order = payment_service.create_order(amount=grand_total, receipt=order_number)
             razorpay_order_id = rz_order.get("id")
