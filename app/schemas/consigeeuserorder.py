@@ -131,6 +131,11 @@ class OrderListResponse(BaseModel):
     tracking_history: List[TrackingHistoryResponse]
     driver_details: Optional[OrderDriverResponse] = None
     vehicle_details: Optional[OrderVehicleResponse] = None
+    grand_total: Optional[float] = None          # total amount customer must pay (freight + insurance)
+    razorpay_order_id: Optional[str] = None      # present for "To Pay" orders
+    razorpay_key_id: Optional[str] = None        # Razorpay publishable key for frontend checkout
+    payment_status: Optional[str] = None         # created | paid | failed (from RazorpayTransaction)
+
 
 class PaginatedOrdersResponse(BaseModel):
     items: List[OrderListResponse]

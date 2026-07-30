@@ -28,6 +28,9 @@ from app.services.notification_service import create_notification
 from app.models.delivery_assignment import DeliveryAssignment
 from app.models.order import OrderStatus
 from app.schemas.consignee_order_create import ConsigneeOrderCreatePayload
+from app.models.razorpay_transaction import RazorpayTransaction
+from app.services.payment_service import payment_service
+from app.schemas.payment import VerifyPaymentRequest
 
 router = APIRouter(prefix="/consignee/orders", tags=["Consignee Orders"])
 
@@ -1378,8 +1381,8 @@ async def create_consignee_order(
         amount=data.amount,
         insurance=(round(data.order_value * 0.018, 2) if data.insurance else 0.0),
         regional_area=data.regional_area,
-        status=OrderStatus.PENDING_APPROVAL.value,
-        previous_status=OrderStatus.PENDING_APPROVAL.value,
+        status=OrderStatus.PAYMENT_PENDING.value if data.payment_method.value == "To Pay" else OrderStatus.PENDING_APPROVAL.value,
+        previous_status=OrderStatus.PAYMENT_PENDING.value if data.payment_method.value == "To Pay" else OrderStatus.PENDING_APPROVAL.value,
         created_by=franchise.user_id, # Link to franchise owner's user ID
         franchise_id=franchise.id,
         warehouse_id=None
@@ -1461,10 +1464,38 @@ async def create_consignee_order(
     order.is_gst_exempt = is_gst_exempt
     order.manual_freight_reason = None
     
+
     # Generate Barcode
     order.barcode = generate_barcode_base64(order_number)
     
+    # Calculate grand_total = shipping + insurance (what user must pay online)
+    insurance_amount = float(order.insurance or 0.0)
+    grand_total = round(float(pricing.total_freight) + insurance_amount, 2)
+
+    razorpay_order_id = None
+    razorpay_key_id = None
+
+    if data.payment_method.value == "To Pay":
+        # To Pay = customer pays freight online via Razorpay
+        try:
+            rz_order = payment_service.create_order(amount=grand_total, receipt=order_number)
+            razorpay_order_id = rz_order.get("id")
+            razorpay_key_id = payment_service.client.auth[0]  # return key so frontend can open checkout
+
+            rz_txn = RazorpayTransaction(
+                id=str(uuid.uuid4()),
+                order_id=order.id,
+                razorpay_order_id=razorpay_order_id,
+                amount=grand_total,
+                status="created"
+            )
+            db.add(rz_txn)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to initialize Razorpay: {str(e)}")
+    # COD = Cash on Delivery, no online payment needed - handled at delivery time
+
     await db.flush()
+
     await db.commit()
     
     # 8. Reload order and return
@@ -1583,8 +1614,76 @@ async def create_consignee_order(
         items=items_data,
         packages=packages_data,
         weight_summary=weight_summary,
-        tracking_history=build_tracking_history(full_order)
+        tracking_history=build_tracking_history(full_order),
+        grand_total=grand_total,
+        razorpay_order_id=razorpay_order_id,
+        razorpay_key_id=razorpay_key_id,
+        payment_status="created" if razorpay_order_id else None
     )
 
 
 
+
+
+@router.post("/verify-payment", tags=["Consignee Orders"])
+async def verify_razorpay_payment(
+    payload: VerifyPaymentRequest,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Called by the frontend after Razorpay checkout completes.
+    Verifies the payment signature and marks the transaction as paid.
+    """
+    # 1. Find the transaction record by razorpay_order_id
+    result = await db.execute(
+        select(RazorpayTransaction).where(
+            RazorpayTransaction.razorpay_order_id == payload.razorpay_order_id
+        )
+    )
+    txn = result.scalar_one_or_none()
+    if not txn:
+        raise HTTPException(status_code=404, detail="Razorpay transaction not found")
+
+    # 2. Make sure this transaction belongs to an order that is the current user's
+    order_result = await db.execute(
+        select(Order).where(Order.id == txn.order_id)
+    )
+    order = order_result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    # 3. Verify payment signature using HMAC-SHA256
+    is_valid = payment_service.verify_payment_signature(
+        razorpay_order_id=payload.razorpay_order_id,
+        razorpay_payment_id=payload.razorpay_payment_id,
+        razorpay_signature=payload.razorpay_signature
+    )
+
+    if not is_valid:
+        # Mark as failed
+        txn.status = "failed"
+        await db.commit()
+        raise HTTPException(status_code=400, detail="Invalid payment signature. Payment verification failed.")
+
+    # 4. Mark transaction as paid and order as pending approval
+    txn.razorpay_payment_id = payload.razorpay_payment_id
+    txn.razorpay_signature = payload.razorpay_signature
+    txn.status = "paid"
+    txn.updated_at = __import__("datetime").datetime.utcnow()
+
+    order.status = OrderStatus.PENDING_APPROVAL.value
+    order.previous_status = OrderStatus.PENDING_APPROVAL.value
+
+    await db.commit()
+    await db.refresh(txn)
+
+    return {
+        "message": "Payment verified successfully",
+        "order_id": txn.order_id,
+        "razorpay_order_id": txn.razorpay_order_id,
+        "razorpay_payment_id": txn.razorpay_payment_id,
+        "amount": float(txn.amount),
+        "currency": txn.currency,
+        "status": txn.status
+    }
