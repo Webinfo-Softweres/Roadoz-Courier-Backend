@@ -33,6 +33,7 @@ class OrderStatus(str, Enum):
     DISPATCHED = "Dispatched"
     WAREHOUSE = "Warehouse"
     PENDING_APPROVAL = "Pending_approval"
+    PAYMENT_PENDING = "Payment_pending"
     REJECTED = "Rejected"
      
 

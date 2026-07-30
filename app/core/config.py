@@ -4,6 +4,8 @@ import secrets
 
 
 class Settings(BaseSettings):
+    RAZORPAY_KEY_ID: str = ""
+    RAZORPAY_SECRET_KEY: str = ""
     # Database (SQLite by default — swap for postgresql+asyncpg://... in production)
     DATABASE_URL: str = "sqlite+aiosqlite:///./franchise.db"
     
