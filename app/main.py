@@ -17,6 +17,7 @@ from app.middleware.auth_middleware import RequestLoggingMiddleware, SecurityHea
 from app.routes import auth, franchise, profile, websocket, rbac, order, remittance, invoice,warehouse, activity_log,consigeeauth,coningeereview,webconfiguration,notification
 from app.routes import auth, franchise, profile, websocket, rbac, order, remittance, invoice,warehouse, activity_log,consigeeauth,coningeereview,webconfiguration, analytics,user_admincommunication, rate_calculator, reports, prints, operations, location
 from app.routes import bulk_order, bag,label,user_franchise,consigeeuserorder, month_end_closing
+from app.routes import franchise_orders
 from app.routes import pickup_assignment as pickup_assignment_routes
 from app.routes import delivery_assignment as delivery_assignment_routes
 
@@ -182,7 +183,10 @@ DEFAULT_PERMISSIONS = [
     # Delivery Assignment
     ("delivery_assignment", "create", "Create delivery assignments"),
     ("delivery_assignment", "view", "View delivery assignments"),
-
+    
+    # user orders 
+    ("user_orders", "approve", "Approve orders"),
+    ("user_orders", "reject", "Reject orders"), 
 ]
 
 
@@ -500,6 +504,7 @@ app.include_router(consigeeuserorder.router,prefix=API_PREFIX)
 app.include_router(month_end_closing.router,prefix=API_PREFIX)
 app.include_router(pickup_assignment_routes.router, prefix=API_PREFIX)
 app.include_router(delivery_assignment_routes.router, prefix=API_PREFIX)
+app.include_router(franchise_orders.router, prefix=API_PREFIX)
 
 app.include_router(fleet_mobile.router)
 app.include_router(fleet_driver_runtime)

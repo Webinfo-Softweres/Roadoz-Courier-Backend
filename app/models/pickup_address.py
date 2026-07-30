@@ -15,6 +15,9 @@ class PickupAddress(Base):
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    auth_user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("auth_users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     franchise_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("franchises.id", ondelete="SET NULL"), nullable=True, index=True
     )

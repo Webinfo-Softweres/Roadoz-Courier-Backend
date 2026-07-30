@@ -4,7 +4,7 @@ from sqlalchemy import select, desc, or_
 from sqlalchemy.orm import selectinload
 from typing import Optional, List
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel,EmailStr
 
 from app.core.database import get_db
 from app.dependencies.consigeeuser import get_current_user
@@ -14,13 +14,20 @@ from app.models.pickup_address import PickupAddress
 from app.models.consignee import Consignee
 from app.models.warehouse import WareHouseAddress, OrderWarehouseAddress
 from app.models.franchise import Franchise, OrderFranchiseAddress
-from app.schemas.consigeeuserorder import PickupAddressResponse,ConsigneeResponse,WarehouseAddressResponse,FranchiseAddressResponse,ItemResponse,PackageResponse,WeightSummaryResponse,OrderListResponse,PaginatedOrdersResponse
+from app.schemas.consigeeuserorder import PickupAddressResponse,ConsigneeResponse,WarehouseAddressResponse,FranchiseAddressResponse,ItemResponse,PackageResponse,WeightSummaryResponse,OrderListResponse,PaginatedOrdersResponse,OrderDriverResponse,OrderVehicleResponse
+from app.modules.fleet.models.driver import Driver
+from app.modules.fleet.models.vehicle import Vehicle
 from app.routes.order import PickupToConsignees,WarehouseToDelivery,FranchiseToDelivery,ConsigneeToDelivery
 from app.models.consigeereview import ProductReview, ReviewStatus
+
+import uuid
+from app.services.order_service import calculate_order_shipping_charge, _generate_order_number, generate_sku
+from app.utils.barcode import generate_barcode_base64
+from app.services.location_service import get_coordinates_from_address
+from app.services.notification_service import create_notification
 from app.models.delivery_assignment import DeliveryAssignment
 from app.models.order import OrderStatus
-
-
+from app.schemas.consignee_order_create import ConsigneeOrderCreatePayload
 
 router = APIRouter(prefix="/consignee/orders", tags=["Consignee Orders"])
 
@@ -80,6 +87,155 @@ def build_tracking_history(order) -> List[dict]:
 
 # ============== API Endpoints ==============
 
+class FranchiseBasicResponse(BaseModel):
+    id: str
+    franchise_id: str
+    nickname: str
+    contact_name: str
+    phone: str | None
+    alternate_phone: str | None = None
+    email: EmailStr | None = None
+    address_line_1: str | None
+    address_line_2: str | None = None
+    landmark: str | None = None
+
+    city: str | None = None
+    state: str | None = None
+    country: str | None = None
+    pincode: str | None = None
+
+    latitude: float | None = None
+    longitude: float | None = None
+    current_address: str | None = None
+
+    class Config:
+        from_attributes = True
+
+@router.get("/franchises", response_model=List[FranchiseBasicResponse])
+async def get_available_franchises(
+    city: str | None = Query(None),
+    state: str | None = Query(None),
+    country: str | None = Query(None),
+    pincode: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: AuthUser = Depends(get_current_user),
+):
+    query = select(Franchise).where(Franchise.is_active == True)
+
+    if city:
+        query = query.where(Franchise.city == city)
+
+    if state:
+        query = query.where(Franchise.state == state)
+
+    if country:
+        query = query.where(Franchise.country == country)
+
+    if pincode:
+        query = query.where(Franchise.pincode == pincode)
+
+    result = await db.execute(query)
+    franchises = result.scalars().all()
+
+    return [
+        FranchiseBasicResponse(
+            id=f.id,
+            franchise_id=f.id,
+            nickname=f.name,
+            contact_name=f.name,
+            phone=f.phone,
+            alternate_phone=getattr(f, "alternate_phone", None),
+            email=f.email,
+            address_line_1=f.address,
+            address_line_2=getattr(f, "detailed_business_address", None),
+            landmark=getattr(f, "nearby_landmark", None),
+            city=f.city,
+            state=f.state,
+            country=f.country,
+            pincode=f.pincode,
+            latitude=float(f.latitude) if f.latitude else None,
+            longitude=float(f.longitude) if f.longitude else None,
+            current_address=f.current_address,
+        )
+        for f in franchises
+    ]
+
+
+
+
+@router.get("/my-pickup-addresses", response_model=List[PickupAddressResponse])
+async def get_my_pickup_addresses(
+    db: AsyncSession = Depends(get_db),
+    current_user: AuthUser = Depends(get_current_user)
+):
+    """
+    Get a list of pickup addresses previously created by/for the authenticated user.
+    """
+    query = select(PickupAddress).where(
+        or_(
+            PickupAddress.auth_user_id == current_user.id,
+            PickupAddress.email == current_user.email
+        )
+    )
+    result = await db.execute(query)
+    addresses = result.scalars().all()
+    
+    return [
+        PickupAddressResponse(
+            id=a.id,
+            nickname=a.nickname,
+            contact_name=a.contact_name,
+            phone=a.phone,
+            email=a.email,
+            address_line_1=a.address_line_1,
+            address_line_2=a.address_line_2,
+            pincode=a.pincode,
+            city=a.city,
+            state=a.state,
+            country=a.country,
+            active=a.active,
+            is_primary=a.is_primary,
+            created_at=a.created_at,
+            updated_at=a.updated_at
+        ) for a in addresses
+    ]
+
+@router.get("/my-consignees", response_model=List[ConsigneeResponse])
+async def get_my_consignees(
+    db: AsyncSession = Depends(get_db),
+    current_user: AuthUser = Depends(get_current_user)
+):
+    """
+    Get a list of receiver consignees previously created by/for the authenticated user.
+    """
+    query = select(Consignee).where(
+        or_(
+            Consignee.auth_user_id == current_user.id,
+            Consignee.email == current_user.email
+        )
+    )
+    result = await db.execute(query)
+    consignees = result.scalars().all()
+    
+    return [
+        ConsigneeResponse(
+            id=c.id,
+            name=c.name,
+            mobile=c.mobile,
+            alternate_mobile=c.alternate_mobile,
+            email=c.email,
+            address_line_1=c.address_line_1,
+            address_line_2=c.address_line_2,
+            pincode=c.pincode,
+            city=c.city,
+            state=c.state,
+            status=c.status,
+            created_at=c.created_at,
+            updated_at=c.updated_at
+        ) for c in consignees
+    ]
+
+
 @router.get("/my-orders", response_model=PaginatedOrdersResponse)
 async def get_my_orders(
     current_user: AuthUser = Depends(get_current_user),
@@ -94,20 +250,20 @@ async def get_my_orders(
     Requires valid JWT token in Authorization header.
     """
     
-    # Find consignee by user_id
-    consignee_result = await db.execute(
-        select(Consignee).where(Consignee.email == current_user.email)
-    )
-    consignee = consignee_result.scalars().first()
-    
-    if not consignee:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Consignee profile not found"
+    # Build base query joining Consignee and PickupAddress
+    query = (
+        select(Order)
+        .outerjoin(Consignee, Order.consignee_id == Consignee.id)
+        .outerjoin(PickupAddress, Order.pickup_address_id == PickupAddress.id)
+        .where(
+            or_(
+                Consignee.auth_user_id == current_user.id,
+                PickupAddress.auth_user_id == current_user.id,
+                Consignee.email == current_user.email,
+                PickupAddress.email == current_user.email
+            )
         )
-    
-    # Build base query
-    query = select(Order).where(Order.consignee_id == consignee.id)
+    )
     
     if status_filter:
         query = query.where(Order.status == status_filter)
@@ -116,7 +272,17 @@ async def get_my_orders(
         query = query.where(Order.order_number.ilike(f"%{search}%"))
     
     # Get total count
-    count_query = select(Order).where(Order.consignee_id == consignee.id)
+    count_query = (
+        select(Order.id)
+        .outerjoin(Consignee, Order.consignee_id == Consignee.id)
+        .outerjoin(PickupAddress, Order.pickup_address_id == PickupAddress.id)
+        .where(
+            or_(
+                Consignee.email == current_user.email,
+                PickupAddress.email == current_user.email
+            )
+        )
+    )
     if status_filter:
         count_query = count_query.where(Order.status == status_filter)
     if search:
@@ -288,6 +454,255 @@ async def get_my_orders(
 
 
 
+
+@router.get("/my-orderlatest")
+async def get_my_order(
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    barcode: str = Query(None, description="Optional barcode (e.g. ORD-001). If omitted returns the latest order."),
+):
+    """
+    Returns order details for the authenticated consignee.
+    - If barcode is provided: returns that specific order.
+    - If barcode is omitted: returns the latest order.
+    Filters by auth_user_id OR email (covers franchise-created orders for this user).
+    Includes full tracking history, driver and vehicle details.
+    """
+    user_filter = or_(
+        Consignee.auth_user_id == current_user.id,
+        PickupAddress.auth_user_id == current_user.id,
+        Consignee.email == current_user.email,
+        PickupAddress.email == current_user.email,
+    )
+
+    base_query = (
+        select(Order)
+        .outerjoin(Consignee, Order.consignee_id == Consignee.id)
+        .outerjoin(PickupAddress, Order.pickup_address_id == PickupAddress.id)
+        .options(
+            selectinload(Order.pickup_address),
+            selectinload(Order.consignee),
+            selectinload(Order.items),
+            selectinload(Order.packages),
+            selectinload(Order.warehouse_addresses).selectinload(OrderWarehouseAddress.warehouse_address),
+            selectinload(Order.franchise_addresses).selectinload(OrderFranchiseAddress.franchise_address),
+        )
+        .where(user_filter)
+    )
+
+    if barcode:
+        base_query = base_query.where(Order.order_number == barcode)
+    else:
+        base_query = base_query.order_by(desc(Order.created_at)).limit(1)
+
+    result = await db.execute(base_query)
+    order = result.scalar_one_or_none()
+
+    if not order:
+        detail = f"Order not found for barcode: {barcode}" if barcode else "No orders found for this user"
+        raise HTTPException(status_code=404, detail=detail)
+
+    return await _build_order_detail_response(order, db)
+
+
+async def _build_order_detail_response(order, db) -> dict:
+    """Builds the full order response dict including all scan stages, driver and vehicle."""
+    # --- Scan records ---
+    pickup_scans = (await db.execute(
+        select(PickupToConsignees).where(PickupToConsignees.order_id == order.id).order_by(PickupToConsignees.created_at)
+    )).scalars().all()
+    warehouse_scans = (await db.execute(
+        select(WarehouseToDelivery).where(WarehouseToDelivery.order_id == order.id).order_by(WarehouseToDelivery.created_at)
+    )).scalars().all()
+    franchise_scans = (await db.execute(
+        select(FranchiseToDelivery).where(FranchiseToDelivery.order_id == order.id).order_by(FranchiseToDelivery.created_at)
+    )).scalars().all()
+    delivery_scans = (await db.execute(
+        select(ConsigneeToDelivery).where(ConsigneeToDelivery.order_id == order.id).order_by(ConsigneeToDelivery.created_at)
+    )).scalars().all()
+
+    # --- Delivery assignment -> driver + vehicle ---
+    delivery_assignment = (await db.execute(
+        select(DeliveryAssignment)
+        .options(selectinload(DeliveryAssignment.driver), selectinload(DeliveryAssignment.vehicle))
+        .where(DeliveryAssignment.order_id == order.id, DeliveryAssignment.status != "cancelled")
+        .order_by(desc(DeliveryAssignment.created_at))
+    )).scalars().first()
+
+    driver_data = None
+    vehicle_data = None
+    if delivery_assignment:
+        if delivery_assignment.driver:
+            driver_data = {
+                "id": delivery_assignment.driver.id,
+                "first_name": delivery_assignment.driver.first_name,
+                "last_name": delivery_assignment.driver.last_name,
+                "phone": delivery_assignment.driver.phone,
+            }
+        if delivery_assignment.vehicle:
+            vehicle_data = {
+                "id": delivery_assignment.vehicle.id,
+                "plate_number": delivery_assignment.vehicle.plate_number,
+                "make": delivery_assignment.vehicle.make,
+                "model": delivery_assignment.vehicle.model,
+                "type": delivery_assignment.vehicle.type,
+            }
+
+    # --- Build tracking timeline ---
+    tracking_history = [{
+        "stage": "Order Created", "status": "Processing", "status_display": "Order Created",
+        "description": f"Order {order.order_number} has been created",
+        "location": order.pickup_address.city if order.pickup_address else "System",
+        "address": order.pickup_address.address_line_1 if order.pickup_address else None,
+        "city": order.pickup_address.city if order.pickup_address else None,
+        "state": order.pickup_address.state if order.pickup_address else None,
+        "pincode": order.pickup_address.pincode if order.pickup_address else None,
+        "contact_name": order.pickup_address.contact_name if order.pickup_address else None,
+        "contact_phone": order.pickup_address.phone if order.pickup_address else None,
+        "timestamp": order.created_at,
+        "formatted_date": order.created_at.strftime("%d %b %Y, %I:%M %p") if order.created_at else None,
+        "is_current": False, "icon": "\U0001f4e6", "scan_id": None, "scan_type": None,
+    }]
+    for scan in pickup_scans:
+        tracking_history.append({
+            "stage": "Pickup", "status": "Picked Up", "status_display": "Picked Up",
+            "description": f"Order picked up from {order.pickup_address.nickname if order.pickup_address else 'pickup location'}",
+            "location": order.pickup_address.city if order.pickup_address else None,
+            "address": order.pickup_address.address_line_1 if order.pickup_address else None,
+            "city": order.pickup_address.city if order.pickup_address else None,
+            "state": order.pickup_address.state if order.pickup_address else None,
+            "pincode": scan.pincode,
+            "contact_name": order.pickup_address.contact_name if order.pickup_address else None,
+            "contact_phone": order.pickup_address.phone if order.pickup_address else None,
+            "timestamp": scan.created_at,
+            "formatted_date": scan.created_at.strftime("%d %b %Y, %I:%M %p") if scan.created_at else None,
+            "is_current": False, "icon": "\U0001f4e4", "scan_id": scan.id, "scan_type": "pickup",
+        })
+    for idx, scan in enumerate(warehouse_scans):
+        wh = scan.warehouse_address if hasattr(scan, "warehouse_address") else None
+        is_current = (idx == len(warehouse_scans) - 1 and order.status in ["Warehouse", "In_transit", "Ofd"])
+        tracking_history.append({
+            "stage": "Warehouse", "status": "In Warehouse", "status_display": f"Warehouse {idx + 1}",
+            "description": f"Order received at {wh.name if wh else 'warehouse'}",
+            "location": wh.city if wh else None,
+            "address": wh.address_line_1 if wh else None,
+            "city": wh.city if wh else None,
+            "state": wh.state if wh else None,
+            "pincode": wh.pincode if wh else None,
+            "timestamp": scan.created_at,
+            "formatted_date": scan.created_at.strftime("%d %b %Y, %I:%M %p") if scan.created_at else None,
+            "is_current": is_current, "icon": "\U0001f3ed", "scan_id": scan.id, "scan_type": "warehouse",
+        })
+    for idx, scan in enumerate(franchise_scans):
+        fr = scan.franchise_address if hasattr(scan, "franchise_address") else None
+        is_current = (idx == len(franchise_scans) - 1 and order.status in ["Franchise", "Ofd", "Out_for_delivery"])
+        tracking_history.append({
+            "stage": "Franchise", "status": "At Franchise", "status_display": "At Franchise Hub",
+            "description": f"Order arrived at {fr.name if fr else 'franchise hub'}",
+            "location": fr.city if fr else None,
+            "address": fr.address if fr else None,
+            "city": fr.city if fr else None,
+            "state": fr.state if fr else None,
+            "pincode": fr.pincode if fr else None,
+            "timestamp": scan.created_at,
+            "formatted_date": scan.created_at.strftime("%d %b %Y, %I:%M %p") if scan.created_at else None,
+            "is_current": is_current, "icon": "\U0001f3ea", "scan_id": scan.id, "scan_type": "franchise",
+        })
+    for idx, scan in enumerate(delivery_scans):
+        is_current = (idx == len(delivery_scans) - 1)
+        tracking_history.append({
+            "stage": "Delivery", "status": "Out for Delivery", "status_display": "Out for Delivery",
+            "description": "Order is out for delivery",
+            "location": order.consignee.city if order.consignee else None,
+            "address": order.consignee.address_line_1 if order.consignee else None,
+            "city": order.consignee.city if order.consignee else None,
+            "pincode": order.consignee.pincode if order.consignee else None,
+            "timestamp": scan.created_at,
+            "formatted_date": scan.created_at.strftime("%d %b %Y, %I:%M %p") if scan.created_at else None,
+            "is_current": is_current, "icon": "\U0001f69a", "scan_id": scan.id, "scan_type": "delivery",
+        })
+
+    return {
+        "id": order.id,
+        "order_number": order.order_number,
+        "barcode": order.barcode,
+        "status": order.status,
+        "previous_status": order.previous_status,
+        "order_type": order.order_type,
+        "payment_method": order.payment_method,
+        "cod_amount": float(order.cod_amount) if order.cod_amount else None,
+        "to_pay_amount": float(order.to_pay_amount) if order.to_pay_amount else None,
+        "credit_amount": float(order.credit_amount) if order.credit_amount else None,
+        "prepaid_amount": float(order.prepaid_amount) if order.prepaid_amount else None,
+        "order_value": float(order.order_value),
+        "shipping_charge": float(order.shipping_charge),
+        "insurance": float(order.insurance) if order.insurance else 0.0,
+        "total_weight_kg": float(order.total_weight_kg),
+        "total_vol_weight_kg": float(order.total_vol_weight_kg),
+        "applicable_weight_kg": float(order.applicable_weight_kg),
+        "total_boxes": order.total_boxes,
+        "gst_number": order.gst_number,
+        "eway_bill_number": order.eway_bill_number,
+        "invoicenumber": order.invoicenumber,
+        "items": [
+            {"id": i.id, "product_name": i.product_name, "sku": i.sku,
+             "unit_price": float(i.unit_price), "qty": i.qty, "total": float(i.total)}
+            for i in order.items
+        ],
+        "packages": [
+            {"id": p.id, "count": p.count, "length_cm": float(p.length_cm), "breadth_cm": float(p.breadth_cm),
+             "height_cm": float(p.height_cm), "vol_weight_kg": float(p.vol_weight_kg),
+             "physical_weight_kg": float(p.physical_weight_kg)}
+            for p in order.packages
+        ],
+        "weight_summary": {
+            "applicable_weight_kg": float(order.applicable_weight_kg),
+            "total_boxes": order.total_boxes,
+            "total_weight_kg": float(order.total_weight_kg),
+            "total_vol_weight_kg": float(order.total_vol_weight_kg),
+        },
+        "pickup_address": {
+            "id": order.pickup_address.id,
+            "nickname": order.pickup_address.nickname,
+            "contact_name": order.pickup_address.contact_name,
+            "phone": order.pickup_address.phone,
+            "email": order.pickup_address.email,
+            "address_line_1": order.pickup_address.address_line_1,
+            "address_line_2": order.pickup_address.address_line_2,
+            "city": order.pickup_address.city,
+            "state": order.pickup_address.state,
+            "pincode": order.pickup_address.pincode,
+            "country": order.pickup_address.country,
+        } if order.pickup_address else None,
+        "consignee": {
+            "id": order.consignee.id,
+            "name": order.consignee.name,
+            "mobile": order.consignee.mobile,
+            "alternate_mobile": order.consignee.alternate_mobile,
+            "email": order.consignee.email,
+            "address_line_1": order.consignee.address_line_1,
+            "address_line_2": order.consignee.address_line_2,
+            "city": order.consignee.city,
+            "state": order.consignee.state,
+            "pincode": order.consignee.pincode,
+        } if order.consignee else None,
+        "tracking_history": tracking_history,
+        "tracking_summary": {
+            "total_scans": len([t for t in tracking_history if t.get("scan_id")]),
+            "pickup_scans": len(pickup_scans),
+            "warehouse_scans": len(warehouse_scans),
+            "franchise_scans": len(franchise_scans),
+            "delivery_scans": len(delivery_scans),
+            "order_status": order.status,
+            "last_updated": order.updated_at.strftime("%d %b %Y, %I:%M %p") if order.updated_at else None,
+        },
+        "driver_details": driver_data,
+        "vehicle_details": vehicle_data,
+        "created_at": order.created_at,
+        "updated_at": order.updated_at,
+    }
+
+
 @router.get("/{order_id}")
 async def get_order_detail(
     order_id: str,
@@ -299,20 +714,14 @@ async def get_order_detail(
     Shows where the order was scanned and reached at each stage based on actual scan records.
     """
     
-    consignee_result = await db.execute(
-        select(Consignee).where(Consignee.email == current_user.email)
-    )
-    consignee = consignee_result.scalars().first()
-    
-    if not consignee:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Consignee profile not found"
-        )
-    
-    query = select(Order).where(
+    query = select(Order).outerjoin(Consignee, Order.consignee_id == Consignee.id).outerjoin(PickupAddress, Order.pickup_address_id == PickupAddress.id).where(
         Order.id == order_id,
-        Order.consignee_id == consignee.id
+        or_(
+            Consignee.auth_user_id == current_user.id,
+            PickupAddress.auth_user_id == current_user.id,
+            Consignee.email == current_user.email,
+            PickupAddress.email == current_user.email
+        )
     ).options(
         selectinload(Order.pickup_address),
         selectinload(Order.consignee),
@@ -367,13 +776,31 @@ async def get_order_detail(
     )
     delivery_scans = delivery_scans.scalars().all()
     
-    # Get Delivery Assignment
+    # Get Delivery Assignment (with driver and vehicle)
     delivery_assignment = await db.execute(
         select(DeliveryAssignment)
+        .options(selectinload(DeliveryAssignment.driver), selectinload(DeliveryAssignment.vehicle))
         .where(DeliveryAssignment.order_id == order.id, DeliveryAssignment.status != "cancelled")
         .order_by(desc(DeliveryAssignment.created_at))
     )
     delivery_assignment = delivery_assignment.scalars().first()
+    
+    driver_data = None
+    vehicle_data = None
+    if delivery_assignment and delivery_assignment.driver and delivery_assignment.vehicle:
+        driver_data = {
+            "id": delivery_assignment.driver.id,
+            "first_name": delivery_assignment.driver.first_name,
+            "last_name": delivery_assignment.driver.last_name,
+            "phone": delivery_assignment.driver.phone
+        }
+        vehicle_data = {
+            "id": delivery_assignment.vehicle.id,
+            "plate_number": delivery_assignment.vehicle.plate_number,
+            "make": delivery_assignment.vehicle.make,
+            "model": delivery_assignment.vehicle.model,
+            "type": delivery_assignment.vehicle.type
+        }
     
     # ========== BUILD TRACKING HISTORY FROM ACTUAL SCANS ==========
     
@@ -776,7 +1203,6 @@ async def get_order_detail(
             "scan_type": None
         }
     
-    # ========== TRACKING SUMMARY ==========
     response["tracking_summary"] = {
         "total_scans": len([t for t in tracking_history if t.get("scan_id")]),
         "pickup_scans": len(pickup_scans),
@@ -787,66 +1213,378 @@ async def get_order_detail(
         "last_updated": order.updated_at.strftime("%d %b %Y, %I:%M %p") if order.updated_at else None
     }
     
-    return response
-from pydantic import BaseModel, EmailStr
-
-
-class CustomerEmailRequest(BaseModel):
-    full_name: str
-    customer_email: EmailStr
-    phone_number: str
-    inquiry_type: str
-    subject: str
-    message: str
+    response["driver_details"] = driver_data
+    response["vehicle_details"] = vehicle_data
     
+    return response
 
-@router.post("/send-email")
-async def send_customer_email(request: CustomerEmailRequest):
-    from app.utils.smtp import send_email
-    target_email = "sreejeshmattannoor4203@gmail.com"
-    html_body = f"""
-    <html>
-    <body style="font-family: Arial, sans-serif;">
-        <h2>📩 New Contact Form Submission</h2>
-        <table cellpadding="8" cellspacing="0" border="1" style="border-collapse: collapse;">
-            <tr>
-                <td><strong>Full Name</strong></td>
-                <td>{request.full_name}</td>
-            </tr>
-            <tr>
-                <td><strong>Email</strong></td>
-                <td>{request.customer_email}</td>
-            </tr>
-            <tr>
-                <td><strong>Phone Number</strong></td>
-                <td>{request.phone_number}</td>
-            </tr>
-            <tr>
-                <td><strong>Inquiry Type</strong></td>
-                <td>{request.inquiry_type}</td>
-            </tr>
-            <tr>
-                <td><strong>Subject</strong></td>
-                <td>{request.subject}</td>
-            </tr>
-        </table>
-        <br>
-        <h3>Message</h3>
-        <p>{request.message}</p>
-        <hr>
-        <p>
-            <strong>Reply directly to this email</strong> to respond to
-            <strong>{request.customer_email}</strong>.
-        </p>
-    </body>
-    </html>
-    """
-    success = await send_email(
-        to_email=target_email,
-        subject=f"Contact Form - {request.subject}",
-        body=html_body,
-        reply_to=request.customer_email,
+
+@router.post("/create", response_model=OrderListResponse, status_code=status.HTTP_201_CREATED)
+async def create_consignee_order(
+    data: ConsigneeOrderCreatePayload,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    # 1. Validate franchise
+    franchise = (await db.execute(select(Franchise).where(Franchise.id == data.franchise_id))).scalar_one_or_none()
+    if not franchise:
+        raise HTTPException(status_code=400, detail="Invalid franchise ID")
+        
+    # 2. Handle Pickup Address (Sender)
+    pickup = None
+    if data.pickup_address_id:
+        pickup = (await db.execute(
+            select(PickupAddress).where(
+                PickupAddress.id == data.pickup_address_id,
+                PickupAddress.franchise_id == franchise.id
+            )
+        )).scalar_one_or_none()
+        if not pickup:
+            raise HTTPException(status_code=404, detail="Pickup address not found under selected franchise")
+    elif data.sender_details:
+        # Check for duplicates under this franchise
+        pickup_conditions = []
+        if data.sender_details.email:
+            pickup_conditions.append(PickupAddress.email == data.sender_details.email)
+        if data.sender_details.phone:
+            pickup_conditions.append(PickupAddress.phone == data.sender_details.phone)
+
+        if pickup_conditions:
+            pickup = (await db.execute(
+                select(PickupAddress).where(
+                    PickupAddress.franchise_id == franchise.id,
+                    or_(*pickup_conditions)
+                )
+            )).scalars().first()
+            
+        if not pickup:
+            lat, lng = None, None
+            try:
+                full_address = f"{data.sender_details.address_line_1} {data.sender_details.city} {data.sender_details.state} {data.sender_details.pincode}"
+                from app.services.location_service import get_coordinates_from_address
+                loc = await get_coordinates_from_address(full_address)
+                if loc:
+                    lat, lng = loc["lat"], loc["lng"]
+            except Exception:
+                pass
+                
+            pickup = PickupAddress(
+                id=str(uuid.uuid4()),
+                user_id=franchise.user_id,
+                auth_user_id=current_user.id,
+                franchise_id=franchise.id,
+                nickname=data.sender_details.nickname,
+                contact_name=data.sender_details.contact_name,
+                phone=data.sender_details.phone,
+                email=data.sender_details.email,
+                address_line_1=data.sender_details.address_line_1,
+                address_line_2=data.sender_details.address_line_2,
+                pincode=data.sender_details.pincode,
+                city=data.sender_details.city,
+                state=data.sender_details.state,
+                country=data.sender_details.country,
+                active=data.sender_details.active,
+                is_primary=data.sender_details.is_primary,
+                latitude=lat,
+                longitude=lng
+            )
+            db.add(pickup)
+            await db.flush()
+    else:
+        raise HTTPException(status_code=400, detail="Either pickup_address_id or sender_details must be provided")
+
+    # 3. Handle Consignee (Receiver)
+    consignee = None
+    if data.consignee_id:
+        consignee = (await db.execute(
+            select(Consignee).where(
+                Consignee.id == data.consignee_id,
+                Consignee.franchise_id == franchise.id
+            )
+        )).scalar_one_or_none()
+        if not consignee:
+            raise HTTPException(status_code=404, detail="Consignee not found under selected franchise")
+    elif data.receiver_details:
+        consignee_conditions = []
+        if data.receiver_details.email:
+            consignee_conditions.append(Consignee.email == data.receiver_details.email)
+        if data.receiver_details.mobile:
+            consignee_conditions.append(Consignee.mobile == data.receiver_details.mobile)
+
+        if consignee_conditions:
+            consignee = (await db.execute(
+                select(Consignee).where(
+                    Consignee.franchise_id == franchise.id,
+                    or_(*consignee_conditions)
+                )
+            )).scalars().first()
+        
+        if not consignee:
+            clat, clng = None, None
+            try:
+                cfull_address = f"{data.receiver_details.address_line_1} {data.receiver_details.city} {data.receiver_details.state} {data.receiver_details.pincode}"
+                from app.services.location_service import get_coordinates_from_address
+                cloc = await get_coordinates_from_address(cfull_address)
+                if cloc:
+                    clat, clng = cloc["lat"], cloc["lng"]
+            except Exception:
+                pass
+
+            consignee = Consignee(
+                id=str(uuid.uuid4()),
+                user_id=franchise.user_id,
+                auth_user_id=current_user.id,
+                franchise_id=franchise.id,
+                name=data.receiver_details.name,
+                mobile=data.receiver_details.mobile,
+                alternate_mobile=data.receiver_details.alternate_mobile,
+                email=data.receiver_details.email,
+                address_line_1=data.receiver_details.address_line_1,
+                address_line_2=data.receiver_details.address_line_2,
+                pincode=data.receiver_details.pincode,
+                city=data.receiver_details.city,
+                state=data.receiver_details.state,
+                latitude=clat,
+                longitude=clng
+            )
+            db.add(consignee)
+            await db.flush()
+    else:
+        raise HTTPException(status_code=400, detail="Either consignee_id or receiver_details must be provided")
+
+    # 4. Generate order number
+    order_number = await _generate_order_number(db)
+    
+    # We use franchise.user_id as the created_by for the order to bypass the foreign key constraint
+    # that requires created_by to be a valid user from the 'users' table, not 'auth_users'.
+    # Alternatively, if there's a system admin user, we could use that. We'll use the franchise owner.
+    
+    order = Order(
+        id=str(uuid.uuid4()),
+        order_number=order_number,
+        order_type=data.order_type.value,
+        pickup_address_id=pickup.id,
+        consignee_id=consignee.id,
+        payment_method=data.payment_method.value,
+        cod_amount=data.cod_amount,
+        to_pay_amount=data.to_pay_amount,
+        credit_amount=data.credit_amount,
+        prepaid_amount=data.prepaid_amount,
+        rov=data.rov.value,
+        order_value=data.order_value,
+        gst_number=data.gst_number,
+        eway_bill_number=data.eway_bill_number,
+        invoicenumber=data.invoicenumber,
+        amount=data.amount,
+        insurance=(round(data.order_value * 0.018, 2) if data.insurance else 0.0),
+        regional_area=data.regional_area,
+        status=OrderStatus.PENDING_APPROVAL.value,
+        previous_status=OrderStatus.PENDING_APPROVAL.value,
+        created_by=franchise.user_id, # Link to franchise owner's user ID
+        franchise_id=franchise.id,
+        warehouse_id=None
     )
-    if success:
-        return {"message": "Email sent successfully"}
-    raise HTTPException(status_code=500, detail="Failed to send email")
+    
+    db.add(order)
+    await db.flush()
+    
+    # 5. Add Items
+    for item_data in data.items:
+        item = OrderItem(
+            id=str(uuid.uuid4()),
+            order_id=order.id,
+            product_name=item_data.product_name,
+            sku=await generate_sku(db),
+            unit_price=item_data.unit_price,
+            qty=item_data.qty,
+            total=item_data.total,
+            package_index=item_data.package_index,
+        )
+        db.add(item)
+        
+    # 6. Add Packages and calculate weights
+    total_boxes = 0
+    total_weight = 0.0
+    total_vol = 0.0
+
+    for idx, pkg_data in enumerate(data.packages, start=1):
+        pkg = OrderPackage(
+            id=str(uuid.uuid4()),
+            order_id=order.id,
+            count=pkg_data.count,
+            package_index=idx,
+            weight_unit=pkg_data.weight_unit,
+            length_cm=pkg_data.length_cm,
+            breadth_cm=pkg_data.breadth_cm,
+            height_cm=pkg_data.height_cm,
+            vol_weight_kg=pkg_data.vol_weight_kg,
+            physical_weight_kg=pkg_data.physical_weight_kg,
+        )
+        db.add(pkg)
+
+        total_boxes += pkg_data.count
+        total_weight += pkg_data.physical_weight_kg * pkg_data.count
+        total_vol += pkg_data.vol_weight_kg * pkg_data.count
+
+    applicable = max(total_weight, total_vol)
+
+    order.total_boxes = total_boxes
+    order.total_weight_kg = round(total_weight, 2)
+    order.total_vol_weight_kg = round(total_vol, 2)
+    order.applicable_weight_kg = round(applicable, 2)
+    
+    # 7. Freight calculation
+    is_gst_exempt = False
+    
+    pricing = await calculate_order_shipping_charge(
+        db,
+        order_type=data.order_type.value,
+        service_type=data.service_type.value,
+        pickup_pincode=pickup.pincode,
+        delivery_pincode=consignee.pincode,
+        payment_method=data.payment_method.value,
+        rov=data.rov.value,
+        order_value=data.order_value,
+        packages=data.packages,
+        is_gst_exempt=is_gst_exempt,
+        is_doc=data.is_doc,
+        delivery_type=data.delivery_type,
+    )
+
+    order.service_type = data.service_type.value
+    order.freight_charge = pricing.freight_charge
+    order.freight_gst = pricing.freight_gst
+    order.total_freight = pricing.total_freight
+    order.applied_weight_slab = pricing.applied_weight_slab
+    order.pricing_zone = pricing.zone
+    order.is_manual_freight = pricing.is_manual_freight
+    order.is_gst_exempt = is_gst_exempt
+    order.manual_freight_reason = None
+    
+    # Generate Barcode
+    order.barcode = generate_barcode_base64(order_number)
+    
+    await db.flush()
+    await db.commit()
+    
+    # 8. Reload order and return
+    query = (
+        select(Order)
+        .where(Order.id == order.id)
+        .options(
+            selectinload(Order.pickup_address),
+            selectinload(Order.consignee),
+            selectinload(Order.items),
+            selectinload(Order.packages),
+            selectinload(Order.warehouse_addresses).selectinload(OrderWarehouseAddress.warehouse_address),
+            selectinload(Order.franchise_addresses).selectinload(OrderFranchiseAddress.franchise_address),
+            selectinload(Order.bag_orders).selectinload(BagOrder.bag),
+        )
+    )
+    result = await db.execute(query)
+    full_order = result.scalar_one()
+    
+    # Format response using proper Pydantic model construction (same as get_my_orders)
+    pickup_data = None
+    if full_order.pickup_address:
+        pickup_data = PickupAddressResponse(
+            id=full_order.pickup_address.id,
+            nickname=full_order.pickup_address.nickname,
+            contact_name=full_order.pickup_address.contact_name,
+            phone=full_order.pickup_address.phone,
+            email=full_order.pickup_address.email,
+            address_line_1=full_order.pickup_address.address_line_1,
+            address_line_2=full_order.pickup_address.address_line_2,
+            pincode=full_order.pickup_address.pincode,
+            city=full_order.pickup_address.city,
+            state=full_order.pickup_address.state,
+            country=full_order.pickup_address.country,
+            active=full_order.pickup_address.active,
+            is_primary=full_order.pickup_address.is_primary,
+            created_at=full_order.pickup_address.created_at,
+            updated_at=full_order.pickup_address.updated_at
+        )
+
+    consignee_data = None
+    if full_order.consignee:
+        consignee_data = ConsigneeResponse(
+            id=full_order.consignee.id,
+            name=full_order.consignee.name,
+            mobile=full_order.consignee.mobile,
+            alternate_mobile=full_order.consignee.alternate_mobile,
+            email=full_order.consignee.email,
+            address_line_1=full_order.consignee.address_line_1,
+            address_line_2=full_order.consignee.address_line_2,
+            pincode=full_order.consignee.pincode,
+            city=full_order.consignee.city,
+            state=full_order.consignee.state,
+            status=full_order.consignee.status,
+            created_at=full_order.consignee.created_at,
+            updated_at=full_order.consignee.updated_at
+        )
+
+    items_data = [
+        ItemResponse(
+            id=item.id,
+            product_name=item.product_name,
+            sku=item.sku,
+            unit_price=float(item.unit_price),
+            qty=item.qty,
+            total=float(item.total)
+        )
+        for item in full_order.items
+    ]
+
+    packages_data = [
+        PackageResponse(
+            id=pkg.id,
+            count=pkg.count,
+            length_cm=float(pkg.length_cm),
+            breadth_cm=float(pkg.breadth_cm),
+            height_cm=float(pkg.height_cm),
+            vol_weight_kg=float(pkg.vol_weight_kg),
+            physical_weight_kg=float(pkg.physical_weight_kg)
+        )
+        for pkg in full_order.packages
+    ]
+
+    weight_summary = WeightSummaryResponse(
+        applicable_weight_kg=float(full_order.applicable_weight_kg),
+        total_boxes=full_order.total_boxes,
+        total_weight_kg=float(full_order.total_weight_kg),
+        total_vol_weight_kg=float(full_order.total_vol_weight_kg)
+    )
+
+    return OrderListResponse(
+        id=full_order.id,
+        order_number=full_order.order_number,
+        order_type=full_order.order_type,
+        status=full_order.status,
+        previous_status=full_order.previous_status,
+        payment_method=full_order.payment_method,
+        cod_amount=float(full_order.cod_amount) if full_order.cod_amount else None,
+        to_pay_amount=float(full_order.to_pay_amount) if full_order.to_pay_amount else None,
+        credit_amount=float(full_order.credit_amount) if full_order.credit_amount else None,
+        order_value=float(full_order.order_value),
+        total_weight_kg=float(full_order.total_weight_kg),
+        total_vol_weight_kg=float(full_order.total_vol_weight_kg),
+        applicable_weight_kg=float(full_order.applicable_weight_kg),
+        total_boxes=full_order.total_boxes,
+        shipping_charge=float(full_order.total_freight),
+        gst_number=full_order.gst_number,
+        eway_bill_number=full_order.eway_bill_number,
+        barcode=full_order.barcode,
+        created_at=full_order.created_at,
+        updated_at=full_order.updated_at,
+        pickup_address=pickup_data,
+        consignee=consignee_data,
+        warehouse_addresses=[],
+        franchise_addresses=[],
+        items=items_data,
+        packages=packages_data,
+        weight_summary=weight_summary,
+        tracking_history=build_tracking_history(full_order)
+    )
+
+
+
