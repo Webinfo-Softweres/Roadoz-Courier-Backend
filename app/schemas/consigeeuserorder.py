@@ -71,8 +71,34 @@ class WeightSummaryResponse(BaseModel):
 class TrackingHistoryResponse(BaseModel):
     stage: str
     status: str
-    pincode: str
-    timestamp: datetime
+    status_display: Optional[str] = None
+    description: Optional[str] = None
+    location: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    pincode: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_phone: Optional[str] = None
+    timestamp: Optional[datetime] = None
+    formatted_date: Optional[str] = None
+    is_current: Optional[bool] = False
+    icon: Optional[str] = None
+    scan_id: Optional[str] = None
+    scan_type: Optional[str] = None
+
+class OrderDriverResponse(BaseModel):
+    id: str
+    first_name: str
+    last_name: str
+    phone: Optional[str]
+
+class OrderVehicleResponse(BaseModel):
+    id: str
+    plate_number: str
+    make: str
+    model: str
+    type: str
 
 class OrderListResponse(BaseModel):
     id: str
@@ -103,6 +129,8 @@ class OrderListResponse(BaseModel):
     packages: List[PackageResponse]
     weight_summary: WeightSummaryResponse
     tracking_history: List[TrackingHistoryResponse]
+    driver_details: Optional[OrderDriverResponse] = None
+    vehicle_details: Optional[OrderVehicleResponse] = None
 
 class PaginatedOrdersResponse(BaseModel):
     items: List[OrderListResponse]

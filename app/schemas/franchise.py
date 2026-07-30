@@ -210,3 +210,13 @@ class FranchisePublicListResponse(BaseModel):
     total: int
     items: List[FranchisePublicItem]
 
+
+
+
+class CustomerEmailRequest(BaseModel):
+    full_name: str
+    customer_email: EmailStr
+    phone_number: str
+    inquiry_type: str
+    subject: str
+    message: str

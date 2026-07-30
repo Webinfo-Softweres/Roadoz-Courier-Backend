@@ -32,6 +32,8 @@ class OrderStatus(str, Enum):
     PICKED = "Picked"           
     DISPATCHED = "Dispatched"
     WAREHOUSE = "Warehouse"
+    PENDING_APPROVAL = "Pending_approval"
+    REJECTED = "Rejected"
      
 
 class BulkOrder(Base):
