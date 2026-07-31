@@ -23,7 +23,7 @@ from app.models.franchise import Franchise,OrderFranchiseAddress
 from app.models.pickup_address import PickupAddress
 from app.models.consignee import Consignee
 from app.models.warehouse import WareHouseAddress,OrderWarehouseAddress
-from app.models.order import Order, OrderItem, OrderPackage, OrderStatus, BulkOrder,Bag,BagOrder
+from app.models.order import Order, OrderItem, OrderPackage, OrderStatus, BulkOrder,Bag,BagOrder, PaymentStatus
 from app.models.role import Role
 from app.models.user_role import UserRole
 
@@ -289,6 +289,7 @@ def _build_order_out(order: Order) -> OrderOut:
         pickup_address=PickupAddressOut.model_validate(order.pickup_address),
         consignee=ConsigneeOut.model_validate(order.consignee),
         payment_method=order.payment_method,
+        payment_status=order.payment_status or PaymentStatus.PAYMENT_PENDING.value,
         cod_amount=float(order.cod_amount) if order.cod_amount is not None else None,
         to_pay_amount=float(order.to_pay_amount) if order.to_pay_amount is not None else None,
         credit_amount=float(order.credit_amount) if order.credit_amount is not None else None,
