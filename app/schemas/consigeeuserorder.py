@@ -115,7 +115,12 @@ class OrderListResponse(BaseModel):
     total_vol_weight_kg: float
     applicable_weight_kg: float
     total_boxes: int
-    shipping_charge: float
+    # Freight breakdown
+    freight_charge: Optional[float] = None      # Base freight (before GST)
+    freight_gst: Optional[float] = None         # GST on freight (18%)
+    total_freight: Optional[float] = None       # freight_charge + freight_gst
+    insurance: Optional[float] = None           # Insurance charge (1.8% of order_value)
+    shipping_charge: float                      # Legacy field = total_freight
     gst_number: Optional[str]
     eway_bill_number: Optional[str]
     barcode: Optional[str]

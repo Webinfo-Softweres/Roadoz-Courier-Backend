@@ -11,9 +11,10 @@ from app.models.franchise import Franchise, OrderFranchiseAddress
 from app.models.warehouse import OrderWarehouseAddress
 from app.models.order import Order, OrderStatus, BagOrder
 from app.schemas.order import OrderOut
-from app.services.order_service import _get_franchise_for_user
+from app.services.order_service import _get_franchise_for_user, _resolve_franchise_id, _resolve_warehouse_id
 from pydantic import BaseModel
 from typing import List
+from datetime import date
 
 class PaginatedFranchiseOrdersResponse(BaseModel):
     items: List[OrderOut]
@@ -197,6 +198,92 @@ async def reject_order(
     
     from app.services.order_service import _build_order_out
     return _build_order_out(order)
+
+
+@router.get("/approvedordre", response_model=PaginatedFranchiseOrdersResponse)
+async def get_approved_orders(
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Items per page"),
+    search: Optional[str] = Query(None, description="Search by order number or consignee name"),
+    start_date: Optional[date] = Query(None, description="Filter by approved date (from)"),
+    end_date: Optional[date] = Query(None, description="Filter by approved date (to)"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("user_orders:approve")),
+):
+    """
+    Get all approved orders (status = Processing).
+
+    - **Franchise user**: sees only orders belonging to their franchise.
+    - **Warehouse user**: sees only orders linked to their warehouse.
+    - **Super Admin**: sees all approved orders across the system.
+    """
+    from sqlalchemy import func, and_
+    from datetime import datetime, time as dt_time
+
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+    is_super_admin = (franchise_id is None and warehouse_id is None)
+
+    # Base filter: status must be Processing (approved)
+    base_filter = [Order.status == OrderStatus.PROCESSING.value]
+
+    if not is_super_admin:
+        if franchise_id:
+            base_filter.append(Order.franchise_id == franchise_id)
+        elif warehouse_id:
+            base_filter.append(Order.warehouse_id == warehouse_id)
+
+    if search:
+        from sqlalchemy import or_
+        from app.models.consignee import Consignee
+        base_filter.append(
+            or_(
+                Order.order_number.ilike(f"%{search}%"),
+            )
+        )
+
+    if start_date:
+        base_filter.append(Order.updated_at >= datetime.combine(start_date, dt_time.min))
+    if end_date:
+        base_filter.append(Order.updated_at <= datetime.combine(end_date, dt_time.max))
+
+    # Count total
+    count_q = select(func.count(Order.id)).where(and_(*base_filter))
+    total = (await db.execute(count_q)).scalar_one()
+
+    # Fetch paginated
+    query = (
+        select(Order)
+        .where(and_(*base_filter))
+        .order_by(desc(Order.updated_at))
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .options(
+            selectinload(Order.items),
+            selectinload(Order.packages),
+            selectinload(Order.pickup_address),
+            selectinload(Order.consignee),
+            selectinload(Order.creator),
+            selectinload(Order.franchise),
+            selectinload(Order.bag_orders).selectinload(BagOrder.bag),
+            selectinload(Order.warehouse_addresses).selectinload(OrderWarehouseAddress.warehouse_address),
+            selectinload(Order.franchise_addresses).selectinload(OrderFranchiseAddress.franchise_address),
+            selectinload(Order.bulk_order),
+        )
+    )
+
+    orders = (await db.execute(query)).scalars().all()
+    total_pages = (total + limit - 1) // limit if total > 0 else 0
+
+    from app.services.order_service import _build_order_out
+    return PaginatedFranchiseOrdersResponse(
+        items=[_build_order_out(o) for o in orders],
+        total=total,
+        page=page,
+        limit=limit,
+        total_pages=total_pages,
+    )
 
 
 @router.get("/{order_id}", response_model=OrderOut)

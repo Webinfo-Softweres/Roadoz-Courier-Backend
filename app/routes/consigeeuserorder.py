@@ -35,6 +35,128 @@ from app.schemas.payment import VerifyPaymentRequest
 router = APIRouter(prefix="/consignee/orders", tags=["Consignee Orders"])
 
 
+# ─── Freight Estimate Schemas ────────────────────────────────────────────────
+
+from pydantic import Field as PField
+from typing import Literal
+
+class FreightEstimatePackage(BaseModel):
+    count: int = PField(1, ge=1, description="Number of boxes")
+    length_cm: float = PField(0.0, ge=0)
+    breadth_cm: float = PField(0.0, ge=0)
+    height_cm: float = PField(0.0, ge=0)
+    physical_weight_kg: float = PField(..., ge=0, description="Physical weight in kg")
+
+    @property
+    def vol_weight_kg(self) -> float:
+        if self.length_cm > 0 and self.breadth_cm > 0 and self.height_cm > 0:
+            return (self.length_cm * self.breadth_cm * self.height_cm) / 2700.0
+        return 0.0
+
+    @property
+    def applicable_weight_kg(self) -> float:
+        return max(self.physical_weight_kg, self.vol_weight_kg)
+
+
+class FreightEstimateRequest(BaseModel):
+    pickup_pincode: str = PField(..., description="Sender's pincode")
+    delivery_pincode: str = PField(..., description="Receiver's pincode")
+    order_type: str = PField("B2C", description="B2C or B2B")
+    service_type: str = PField("Surface", description="Surface or Air")
+    payment_method: str = PField("Prepaid", description="Prepaid, COD, To Pay, Credit")
+    rov: str = PField("owner_risk", description="owner_risk or carrier_risk")
+    order_value: float = PField(0.0, ge=0, description="Declared value of the shipment")
+    insurance: bool = PField(False, description="Whether insurance is required")
+    is_doc: bool = PField(False, description="Is this a document shipment?")
+    delivery_type: Literal["office", "home"] = PField("office")
+    packages: List[FreightEstimatePackage] = PField(..., min_length=1)
+
+
+class FreightEstimateResponse(BaseModel):
+    pickup_pincode: str
+    delivery_pincode: str
+    applicable_weight_kg: float
+    total_weight_kg: float
+    total_vol_weight_kg: float
+    total_boxes: int
+    zone: Optional[str]
+    freight_charge: float
+    freight_gst: float
+    total_freight: float
+    insurance_charge: float
+    grand_total: float
+    applied_weight_slab: Optional[float]
+
+
+# ─── Freight Estimate Endpoint ───────────────────────────────────────────────
+
+@router.post(
+    "/freight-estimate",
+    response_model=FreightEstimateResponse,
+    summary="Estimate freight charge before creating an order",
+)
+async def estimate_freight(
+    data: FreightEstimateRequest,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Pass package dimensions & weight along with pickup/delivery pincodes
+    to get a real-time freight charge estimate — same calculation used in
+    /consignee/orders/create.
+    """
+    # Build lightweight package objects compatible with calculate_order_shipping_charge
+    pkg_dicts = [
+        {
+            "count": pkg.count,
+            "length_cm": pkg.length_cm,
+            "breadth_cm": pkg.breadth_cm,
+            "height_cm": pkg.height_cm,
+            "physical_weight_kg": pkg.physical_weight_kg,
+        }
+        for pkg in data.packages
+    ]
+
+    pricing = await calculate_order_shipping_charge(
+        db,
+        order_type=data.order_type,
+        service_type=data.service_type,
+        pickup_pincode=data.pickup_pincode,
+        delivery_pincode=data.delivery_pincode,
+        payment_method=data.payment_method,
+        rov=data.rov,
+        order_value=data.order_value,
+        packages=pkg_dicts,
+        is_gst_exempt=True,
+        is_doc=data.is_doc,
+        delivery_type=data.delivery_type,
+    )
+
+    # Weight summary
+    total_weight = sum(p.physical_weight_kg * p.count for p in data.packages)
+    total_vol = sum(p.vol_weight_kg * p.count for p in data.packages)
+    applicable = max(total_weight, total_vol)
+    total_boxes = sum(p.count for p in data.packages)
+
+    insurance_charge = round(data.order_value * 0.018, 2) if data.insurance else 0.0
+    grand_total = round(pricing.total_freight + insurance_charge, 2)
+
+    return FreightEstimateResponse(
+        pickup_pincode=data.pickup_pincode,
+        delivery_pincode=data.delivery_pincode,
+        applicable_weight_kg=round(applicable, 2),
+        total_weight_kg=round(total_weight, 2),
+        total_vol_weight_kg=round(total_vol, 2),
+        total_boxes=total_boxes,
+        zone=pricing.zone,
+        freight_charge=pricing.freight_charge,
+        freight_gst=pricing.freight_gst,
+        total_freight=pricing.total_freight,
+        insurance_charge=insurance_charge,
+        grand_total=grand_total,
+        applied_weight_slab=pricing.applied_weight_slab,
+    )
+
 
 def build_tracking_history(order) -> List[dict]:
     """Build tracking history from order data"""
@@ -1475,7 +1597,7 @@ async def create_consignee_order(
     order.applicable_weight_kg = round(applicable, 2)
     
     # 7. Freight calculation
-    is_gst_exempt = False
+    is_gst_exempt = True
     
     pricing = await calculate_order_shipping_charge(
         db,
@@ -1639,7 +1761,12 @@ async def create_consignee_order(
         total_vol_weight_kg=float(full_order.total_vol_weight_kg),
         applicable_weight_kg=float(full_order.applicable_weight_kg),
         total_boxes=full_order.total_boxes,
-        shipping_charge=float(full_order.total_freight),
+        # Freight breakdown fields
+        freight_charge=float(full_order.freight_charge) if full_order.freight_charge is not None else None,
+        freight_gst=float(full_order.freight_gst) if full_order.freight_gst is not None else None,
+        total_freight=float(full_order.total_freight) if full_order.total_freight is not None else None,
+        insurance=float(full_order.insurance) if full_order.insurance else None,
+        shipping_charge=float(full_order.total_freight) if full_order.total_freight else 0.0,
         gst_number=full_order.gst_number,
         eway_bill_number=full_order.eway_bill_number,
         barcode=full_order.barcode,
