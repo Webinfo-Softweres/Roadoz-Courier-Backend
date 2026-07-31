@@ -33,8 +33,13 @@ class OrderStatus(str, Enum):
     DISPATCHED = "Dispatched"
     WAREHOUSE = "Warehouse"
     PENDING_APPROVAL = "Pending_approval"
-    PAYMENT_PENDING = "Payment_pending"
     REJECTED = "Rejected"
+
+class PaymentStatus(str, Enum):
+    PAYMENT_PENDING = "Payment_pending"
+    CREATED = "created"
+    PAID = "paid"
+    FAILED = "failed"
      
 
 class BulkOrder(Base):
@@ -93,6 +98,7 @@ class Order(Base):
     bag_orders = relationship("BagOrder", back_populates="order",cascade="all, delete-orphan", lazy="selectin")
     # Payment
     payment_method: Mapped[str] = mapped_column(String(20), nullable=False)  # COD | Prepaid | To Pay | Credit
+    payment_status: Mapped[str] = mapped_column(String(50), nullable=True, default=PaymentStatus.PAYMENT_PENDING.value)
     cod_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)  # required when COD
     prepaid_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)  # required when Prepaid
     to_pay_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)  # required when To Pay

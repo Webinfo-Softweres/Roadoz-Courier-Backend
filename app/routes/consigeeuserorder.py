@@ -26,7 +26,7 @@ from app.utils.barcode import generate_barcode_base64
 from app.services.location_service import get_coordinates_from_address
 from app.services.notification_service import create_notification
 from app.models.delivery_assignment import DeliveryAssignment
-from app.models.order import OrderStatus
+from app.models.order import OrderStatus,PaymentStatus
 from app.schemas.consignee_order_create import ConsigneeOrderCreatePayload
 from app.models.razorpay_transaction import RazorpayTransaction
 from app.services.payment_service import payment_service
@@ -580,6 +580,7 @@ async def get_my_orders(
             status=order.status,
             previous_status=order.previous_status,
             payment_method=order.payment_method,
+            payment_status=order.payment_status,
             cod_amount=float(order.cod_amount) if order.cod_amount else None,
             to_pay_amount=float(order.to_pay_amount) if order.to_pay_amount else None,
             credit_amount=float(order.credit_amount) if order.credit_amount else None,
@@ -791,6 +792,7 @@ async def _build_order_detail_response(order, db) -> dict:
         "barcode": order.barcode,
         "status": order.status,
         "previous_status": order.previous_status,
+        "payment_status" :order.payment_status,
         "order_type": order.order_type,
         "payment_method": order.payment_method,
         "cod_amount": float(order.cod_amount) if order.cod_amount else None,
@@ -1202,6 +1204,7 @@ async def get_order_detail(
         "order_type": order.order_type,
         "status": order.status,
         "previous_status": order.previous_status,
+        "payment_status":order.payment_status,
         "payment_method": order.payment_method,
         "cod_amount": float(order.cod_amount) if order.cod_amount else None,
         "to_pay_amount": float(order.to_pay_amount) if order.to_pay_amount else None,
@@ -1541,8 +1544,9 @@ async def create_consignee_order(
         amount=data.amount,
         insurance=(round(data.order_value * 0.018, 2) if data.insurance else 0.0),
         regional_area=data.regional_area,
-        status=OrderStatus.PAYMENT_PENDING.value if data.payment_method.value == "Prepaid" else OrderStatus.PENDING_APPROVAL.value,
-        previous_status=OrderStatus.PAYMENT_PENDING.value if data.payment_method.value == "Prepaid" else OrderStatus.PENDING_APPROVAL.value,
+        payment_status=PaymentStatus.PAYMENT_PENDING.value,
+        status=OrderStatus.PENDING_APPROVAL.value,
+        previous_status= OrderStatus.PENDING_APPROVAL.value,
         created_by=franchise.user_id, # Link to franchise owner's user ID
         franchise_id=franchise.id,
         warehouse_id=None
@@ -1837,8 +1841,7 @@ async def verify_razorpay_payment(
     txn.status = "paid"
     txn.updated_at = __import__("datetime").datetime.utcnow()
 
-    order.status = OrderStatus.PENDING_APPROVAL.value
-    order.previous_status = OrderStatus.PENDING_APPROVAL.value
+    order.payment_status = PaymentStatus.CREATED.value
 
     await db.commit()
     await db.refresh(txn)
