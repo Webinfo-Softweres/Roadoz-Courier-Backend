@@ -25,8 +25,9 @@ openpyxl==3.1.2
 # psycopg2-binary==2.9.9
 reportlab==4.1.0
 aiosmtplib==3.0.1
-setuptools
+setuptools<70.0.0
 razorpay==1.4.2
+
 
 
 
