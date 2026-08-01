@@ -32,6 +32,8 @@ class VehicleBrief(BaseModel):
     model_config = {"from_attributes": True}
 
 
+from app.schemas.order import OrderOut
+
 class PickupAssignmentOut(BaseModel):
     id: str
     order_id: str
@@ -46,6 +48,7 @@ class PickupAssignmentOut(BaseModel):
     updated_at: datetime
     driver: Optional[DriverBrief] = None
     vehicle: Optional[VehicleBrief] = None
+    order: Optional[OrderOut] = None
 
     model_config = {"from_attributes": True}
 

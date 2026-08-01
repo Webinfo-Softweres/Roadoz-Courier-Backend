@@ -6,6 +6,13 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+from app.models.order import OrderItem, OrderPackage, BagOrder
+from app.models.warehouse import OrderWarehouseAddress
+from app.models.franchise import OrderFranchiseAddress
+from app.services.order_service import _build_order_out
+from app.schemas.pickup_assignment import DriverBrief, VehicleBrief
+
 
 from app.core.config import settings
 from app.core.database import get_db
@@ -26,6 +33,26 @@ from app.schemas.pickup_assignment import (
 from app.utils.smtp import send_assignment_otp_email
 
 router = APIRouter(prefix="/pickup-assignments", tags=["Pickup Assignment"])
+
+
+
+def _map_pickup_assignment_out(a: PickupAssignment) -> PickupAssignmentOut:
+    return PickupAssignmentOut(
+        id=a.id,
+        order_id=a.order_id,
+        franchise_id=a.franchise_id,
+        warehouse_id=a.warehouse_id,
+        driver_id=a.driver_id,
+        vehicle_id=a.vehicle_id,
+        otp_status=a.otp_status,
+        status=a.status,
+        created_by=a.created_by,
+        created_at=a.created_at,
+        updated_at=a.updated_at,
+        driver=DriverBrief.model_validate(a.driver) if a.driver else None,
+        vehicle=VehicleBrief.model_validate(a.vehicle) if a.vehicle else None,
+        order=_build_order_out(a.order) if a.order else None
+    )
 
 
 def _generate_otp(length: int = 6) -> str:
@@ -144,7 +171,7 @@ async def create_pickup_assignment(
                 otp=otp,
             )
 
-    return [PickupAssignmentOut.model_validate(a) for a in created_assignments]
+    return [_map_pickup_assignment_out(a) for a in created_assignments]
 
 
 
@@ -176,11 +203,26 @@ async def list_pickup_assignments(
     if status_filter:
         query = query.where(PickupAssignment.status == status_filter)
 
+    
+    query = query.options(
+        selectinload(PickupAssignment.order).selectinload(Order.items),
+        selectinload(PickupAssignment.order).selectinload(Order.packages),
+        selectinload(PickupAssignment.order).selectinload(Order.pickup_address),
+        selectinload(PickupAssignment.order).selectinload(Order.consignee),
+        selectinload(PickupAssignment.order).selectinload(Order.creator),
+        selectinload(PickupAssignment.order).selectinload(Order.franchise),
+        selectinload(PickupAssignment.order).selectinload(Order.bag_orders).selectinload(BagOrder.bag),
+        selectinload(PickupAssignment.order).selectinload(Order.warehouse_addresses).selectinload(OrderWarehouseAddress.warehouse_address),
+        selectinload(PickupAssignment.order).selectinload(Order.franchise_addresses).selectinload(OrderFranchiseAddress.franchise_address),
+        selectinload(PickupAssignment.order).selectinload(Order.bulk_order),
+        selectinload(PickupAssignment.driver),
+        selectinload(PickupAssignment.vehicle)
+    )
     result = await db.execute(query)
     items = result.scalars().all()
     return PickupAssignmentListResponse(
         total=len(items),
-        items=[PickupAssignmentOut.model_validate(a) for a in items],
+        items=[_map_pickup_assignment_out(a) for a in items],
     )
 
 
@@ -196,11 +238,28 @@ async def get_pickup_assignment(
 ):
     """Get a specific pickup assignment by ID."""
     assignment = (
-        await db.execute(select(PickupAssignment).where(PickupAssignment.id == assignment_id))
+        await db.execute(
+            select(PickupAssignment)
+            .where(PickupAssignment.id == assignment_id)
+            .options(
+                selectinload(PickupAssignment.order).selectinload(Order.items),
+                selectinload(PickupAssignment.order).selectinload(Order.packages),
+                selectinload(PickupAssignment.order).selectinload(Order.pickup_address),
+                selectinload(PickupAssignment.order).selectinload(Order.consignee),
+                selectinload(PickupAssignment.order).selectinload(Order.creator),
+                selectinload(PickupAssignment.order).selectinload(Order.franchise),
+                selectinload(PickupAssignment.order).selectinload(Order.bag_orders).selectinload(BagOrder.bag),
+                selectinload(PickupAssignment.order).selectinload(Order.warehouse_addresses).selectinload(OrderWarehouseAddress.warehouse_address),
+                selectinload(PickupAssignment.order).selectinload(Order.franchise_addresses).selectinload(OrderFranchiseAddress.franchise_address),
+                selectinload(PickupAssignment.order).selectinload(Order.bulk_order),
+                selectinload(PickupAssignment.driver),
+                selectinload(PickupAssignment.vehicle)
+            )
+        )
     ).scalar_one_or_none()
     if not assignment:
         raise HTTPException(status_code=404, detail="Pickup assignment not found")
-    return PickupAssignmentOut.model_validate(assignment)
+    return _map_pickup_assignment_out(assignment)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -219,7 +278,24 @@ async def verify_pickup_otp(
     On success: otp_status → verified, status → completed.
     """
     assignment = (
-        await db.execute(select(PickupAssignment).where(PickupAssignment.id == assignment_id))
+        await db.execute(
+            select(PickupAssignment)
+            .where(PickupAssignment.id == assignment_id)
+            .options(
+                selectinload(PickupAssignment.order).selectinload(Order.items),
+                selectinload(PickupAssignment.order).selectinload(Order.packages),
+                selectinload(PickupAssignment.order).selectinload(Order.pickup_address),
+                selectinload(PickupAssignment.order).selectinload(Order.consignee),
+                selectinload(PickupAssignment.order).selectinload(Order.creator),
+                selectinload(PickupAssignment.order).selectinload(Order.franchise),
+                selectinload(PickupAssignment.order).selectinload(Order.bag_orders).selectinload(BagOrder.bag),
+                selectinload(PickupAssignment.order).selectinload(Order.warehouse_addresses).selectinload(OrderWarehouseAddress.warehouse_address),
+                selectinload(PickupAssignment.order).selectinload(Order.franchise_addresses).selectinload(OrderFranchiseAddress.franchise_address),
+                selectinload(PickupAssignment.order).selectinload(Order.bulk_order),
+                selectinload(PickupAssignment.driver),
+                selectinload(PickupAssignment.vehicle)
+            )
+        )
     ).scalar_one_or_none()
     if not assignment:
         raise HTTPException(status_code=404, detail="Pickup assignment not found")
@@ -257,7 +333,24 @@ async def delete_pickup_assignment(
 ):
     """Delete a pickup assignment completely from the database."""
     assignment = (
-        await db.execute(select(PickupAssignment).where(PickupAssignment.id == assignment_id))
+        await db.execute(
+            select(PickupAssignment)
+            .where(PickupAssignment.id == assignment_id)
+            .options(
+                selectinload(PickupAssignment.order).selectinload(Order.items),
+                selectinload(PickupAssignment.order).selectinload(Order.packages),
+                selectinload(PickupAssignment.order).selectinload(Order.pickup_address),
+                selectinload(PickupAssignment.order).selectinload(Order.consignee),
+                selectinload(PickupAssignment.order).selectinload(Order.creator),
+                selectinload(PickupAssignment.order).selectinload(Order.franchise),
+                selectinload(PickupAssignment.order).selectinload(Order.bag_orders).selectinload(BagOrder.bag),
+                selectinload(PickupAssignment.order).selectinload(Order.warehouse_addresses).selectinload(OrderWarehouseAddress.warehouse_address),
+                selectinload(PickupAssignment.order).selectinload(Order.franchise_addresses).selectinload(OrderFranchiseAddress.franchise_address),
+                selectinload(PickupAssignment.order).selectinload(Order.bulk_order),
+                selectinload(PickupAssignment.driver),
+                selectinload(PickupAssignment.vehicle)
+            )
+        )
     ).scalar_one_or_none()
     
     if not assignment:

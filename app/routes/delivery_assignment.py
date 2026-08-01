@@ -6,6 +6,14 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+from app.models.order import OrderItem, OrderPackage, BagOrder
+from app.models.warehouse import OrderWarehouseAddress
+from app.models.franchise import OrderFranchiseAddress
+from app.services.order_service import _build_order_out
+from app.schemas.order import ConsigneeOut
+from app.schemas.delivery_assignment import DriverBrief, VehicleBrief
+
 
 from app.core.config import settings
 from app.core.database import get_db
@@ -26,6 +34,29 @@ from app.schemas.delivery_assignment import (
 from app.utils.smtp import send_assignment_otp_email
 
 router = APIRouter(prefix="/delivery-assignments", tags=["Delivery Assignment"])
+
+
+
+def _map_delivery_assignment_out(a: DeliveryAssignment) -> DeliveryAssignmentOut:
+    return DeliveryAssignmentOut(
+        id=a.id,
+        order_id=a.order_id,
+        consignee_id=a.consignee_id,
+        franchise_id=a.franchise_id,
+        warehouse_id=a.warehouse_id,
+        driver_id=a.driver_id,
+        vehicle_id=a.vehicle_id,
+        delivery_address=a.delivery_address,
+        otp_status=a.otp_status,
+        status=a.status,
+        created_by=a.created_by,
+        created_at=a.created_at,
+        updated_at=a.updated_at,
+        driver=DriverBrief.model_validate(a.driver) if a.driver else None,
+        vehicle=VehicleBrief.model_validate(a.vehicle) if a.vehicle else None,
+        consignee=ConsigneeOut.model_validate(a.consignee) if a.consignee else None,
+        order=_build_order_out(a.order) if a.order else None
+    )
 
 
 def _generate_otp(length: int = 6) -> str:
@@ -185,7 +216,7 @@ async def create_delivery_assignment(
                 otp=otp,
             )
 
-    return [DeliveryAssignmentOut.model_validate(a) for a in created_assignments]
+    return [_map_delivery_assignment_out(a) for a in created_assignments]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -216,11 +247,27 @@ async def list_delivery_assignments(
     if status_filter:
         query = query.where(DeliveryAssignment.status == status_filter)
 
+    
+    query = query.options(
+        selectinload(DeliveryAssignment.order).selectinload(Order.items),
+        selectinload(DeliveryAssignment.order).selectinload(Order.packages),
+        selectinload(DeliveryAssignment.order).selectinload(Order.pickup_address),
+        selectinload(DeliveryAssignment.order).selectinload(Order.consignee),
+        selectinload(DeliveryAssignment.order).selectinload(Order.creator),
+        selectinload(DeliveryAssignment.order).selectinload(Order.franchise),
+        selectinload(DeliveryAssignment.order).selectinload(Order.bag_orders).selectinload(BagOrder.bag),
+        selectinload(DeliveryAssignment.order).selectinload(Order.warehouse_addresses).selectinload(OrderWarehouseAddress.warehouse_address),
+        selectinload(DeliveryAssignment.order).selectinload(Order.franchise_addresses).selectinload(OrderFranchiseAddress.franchise_address),
+        selectinload(DeliveryAssignment.order).selectinload(Order.bulk_order),
+        selectinload(DeliveryAssignment.consignee),
+        selectinload(DeliveryAssignment.driver),
+        selectinload(DeliveryAssignment.vehicle)
+    )
     result = await db.execute(query)
     items = result.scalars().all()
     return DeliveryAssignmentListResponse(
         total=len(items),
-        items=[DeliveryAssignmentOut.model_validate(a) for a in items],
+        items=[_map_delivery_assignment_out(a) for a in items],
     )
 
 
@@ -236,11 +283,29 @@ async def get_delivery_assignment(
 ):
     """Get a specific delivery assignment by ID."""
     assignment = (
-        await db.execute(select(DeliveryAssignment).where(DeliveryAssignment.id == assignment_id))
+        await db.execute(
+            select(DeliveryAssignment)
+            .where(DeliveryAssignment.id == assignment_id)
+            .options(
+                selectinload(DeliveryAssignment.order).selectinload(Order.items),
+                selectinload(DeliveryAssignment.order).selectinload(Order.packages),
+                selectinload(DeliveryAssignment.order).selectinload(Order.pickup_address),
+                selectinload(DeliveryAssignment.order).selectinload(Order.consignee),
+                selectinload(DeliveryAssignment.order).selectinload(Order.creator),
+                selectinload(DeliveryAssignment.order).selectinload(Order.franchise),
+                selectinload(DeliveryAssignment.order).selectinload(Order.bag_orders).selectinload(BagOrder.bag),
+                selectinload(DeliveryAssignment.order).selectinload(Order.warehouse_addresses).selectinload(OrderWarehouseAddress.warehouse_address),
+                selectinload(DeliveryAssignment.order).selectinload(Order.franchise_addresses).selectinload(OrderFranchiseAddress.franchise_address),
+                selectinload(DeliveryAssignment.order).selectinload(Order.bulk_order),
+                selectinload(DeliveryAssignment.consignee),
+                selectinload(DeliveryAssignment.driver),
+                selectinload(DeliveryAssignment.vehicle)
+            )
+        )
     ).scalar_one_or_none()
     if not assignment:
         raise HTTPException(status_code=404, detail="Delivery assignment not found")
-    return DeliveryAssignmentOut.model_validate(assignment)
+    return _map_delivery_assignment_out(assignment)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -259,7 +324,25 @@ async def verify_delivery_otp(
     On success: otp_status → verified, status → completed, order → Delivered.
     """
     assignment = (
-        await db.execute(select(DeliveryAssignment).where(DeliveryAssignment.id == assignment_id))
+        await db.execute(
+            select(DeliveryAssignment)
+            .where(DeliveryAssignment.id == assignment_id)
+            .options(
+                selectinload(DeliveryAssignment.order).selectinload(Order.items),
+                selectinload(DeliveryAssignment.order).selectinload(Order.packages),
+                selectinload(DeliveryAssignment.order).selectinload(Order.pickup_address),
+                selectinload(DeliveryAssignment.order).selectinload(Order.consignee),
+                selectinload(DeliveryAssignment.order).selectinload(Order.creator),
+                selectinload(DeliveryAssignment.order).selectinload(Order.franchise),
+                selectinload(DeliveryAssignment.order).selectinload(Order.bag_orders).selectinload(BagOrder.bag),
+                selectinload(DeliveryAssignment.order).selectinload(Order.warehouse_addresses).selectinload(OrderWarehouseAddress.warehouse_address),
+                selectinload(DeliveryAssignment.order).selectinload(Order.franchise_addresses).selectinload(OrderFranchiseAddress.franchise_address),
+                selectinload(DeliveryAssignment.order).selectinload(Order.bulk_order),
+                selectinload(DeliveryAssignment.consignee),
+                selectinload(DeliveryAssignment.driver),
+                selectinload(DeliveryAssignment.vehicle)
+            )
+        )
     ).scalar_one_or_none()
     if not assignment:
         raise HTTPException(status_code=404, detail="Delivery assignment not found")
@@ -303,7 +386,25 @@ async def cancel_delivery_assignment(
 ):
     """Cancel an active delivery assignment."""
     assignment = (
-        await db.execute(select(DeliveryAssignment).where(DeliveryAssignment.id == assignment_id))
+        await db.execute(
+            select(DeliveryAssignment)
+            .where(DeliveryAssignment.id == assignment_id)
+            .options(
+                selectinload(DeliveryAssignment.order).selectinload(Order.items),
+                selectinload(DeliveryAssignment.order).selectinload(Order.packages),
+                selectinload(DeliveryAssignment.order).selectinload(Order.pickup_address),
+                selectinload(DeliveryAssignment.order).selectinload(Order.consignee),
+                selectinload(DeliveryAssignment.order).selectinload(Order.creator),
+                selectinload(DeliveryAssignment.order).selectinload(Order.franchise),
+                selectinload(DeliveryAssignment.order).selectinload(Order.bag_orders).selectinload(BagOrder.bag),
+                selectinload(DeliveryAssignment.order).selectinload(Order.warehouse_addresses).selectinload(OrderWarehouseAddress.warehouse_address),
+                selectinload(DeliveryAssignment.order).selectinload(Order.franchise_addresses).selectinload(OrderFranchiseAddress.franchise_address),
+                selectinload(DeliveryAssignment.order).selectinload(Order.bulk_order),
+                selectinload(DeliveryAssignment.consignee),
+                selectinload(DeliveryAssignment.driver),
+                selectinload(DeliveryAssignment.vehicle)
+            )
+        )
     ).scalar_one_or_none()
     if not assignment:
         raise HTTPException(status_code=404, detail="Delivery assignment not found")
@@ -336,7 +437,25 @@ async def resend_delivery_otp(
 ):
     """Regenerate and resend OTP for a delivery assignment."""
     assignment = (
-        await db.execute(select(DeliveryAssignment).where(DeliveryAssignment.id == assignment_id))
+        await db.execute(
+            select(DeliveryAssignment)
+            .where(DeliveryAssignment.id == assignment_id)
+            .options(
+                selectinload(DeliveryAssignment.order).selectinload(Order.items),
+                selectinload(DeliveryAssignment.order).selectinload(Order.packages),
+                selectinload(DeliveryAssignment.order).selectinload(Order.pickup_address),
+                selectinload(DeliveryAssignment.order).selectinload(Order.consignee),
+                selectinload(DeliveryAssignment.order).selectinload(Order.creator),
+                selectinload(DeliveryAssignment.order).selectinload(Order.franchise),
+                selectinload(DeliveryAssignment.order).selectinload(Order.bag_orders).selectinload(BagOrder.bag),
+                selectinload(DeliveryAssignment.order).selectinload(Order.warehouse_addresses).selectinload(OrderWarehouseAddress.warehouse_address),
+                selectinload(DeliveryAssignment.order).selectinload(Order.franchise_addresses).selectinload(OrderFranchiseAddress.franchise_address),
+                selectinload(DeliveryAssignment.order).selectinload(Order.bulk_order),
+                selectinload(DeliveryAssignment.consignee),
+                selectinload(DeliveryAssignment.driver),
+                selectinload(DeliveryAssignment.vehicle)
+            )
+        )
     ).scalar_one_or_none()
     if not assignment:
         raise HTTPException(status_code=404, detail="Delivery assignment not found")
