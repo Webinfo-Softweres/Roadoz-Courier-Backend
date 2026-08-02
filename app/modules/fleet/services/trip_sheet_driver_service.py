@@ -172,6 +172,33 @@ def build_trip_detail(sheet: TripSheet, order: Order) -> dict:
             },
         }
 
+    packages = [
+        {
+            "id": pkg.id,
+            "packageIndex": pkg.package_index,
+            "count": pkg.count,
+            "weightUnit": pkg.weight_unit,
+            "lengthCm": float(pkg.length_cm or 0),
+            "breadthCm": float(pkg.breadth_cm or 0),
+            "heightCm": float(pkg.height_cm or 0),
+            "volWeightKg": float(pkg.vol_weight_kg or 0),
+            "physicalWeightKg": float(pkg.physical_weight_kg or 0),
+        }
+        for pkg in (order.packages or [])
+    ]
+    items = [
+        {
+            "id": item.id,
+            "productName": item.product_name,
+            "sku": item.sku,
+            "unitPrice": float(item.unit_price or 0),
+            "qty": item.qty,
+            "total": float(item.total or 0),
+            "packageIndex": item.package_index,
+        }
+        for item in (order.items or [])
+    ]
+
     return {
         "id": order.id,
         "tripSheetId": sheet.id,
@@ -181,6 +208,14 @@ def build_trip_detail(sheet: TripSheet, order: Order) -> dict:
         "status": order.status,
         "paymentStatus": payment_status,
         "amount": amount,
+        "packageSummary": {
+            "type": order.order_type,
+            "totalWeightKg": float(order.total_weight_kg or 0),
+            "totalPackages": len(packages),
+            "totalItems": len(items),
+        },
+        "packages": packages,
+        "items": items,
         "pickupStop": stop(
             "PICKUP",
             "PICKUP LOCATION",
