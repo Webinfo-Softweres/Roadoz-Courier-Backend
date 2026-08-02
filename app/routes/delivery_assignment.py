@@ -180,7 +180,7 @@ async def create_delivery_assignment(
 
         # Generate OTP
         otp = _generate_otp()
-        otp_expiry = datetime.utcnow() + timedelta(minutes=settings.OTP_EXPIRE_MINUTES)
+        otp_expiry = datetime.utcnow() + timedelta(minutes=settings.OTP__MINUTES)
 
         # Promote order to OUT_FOR_DELIVERY
         order.previous_status = order.status

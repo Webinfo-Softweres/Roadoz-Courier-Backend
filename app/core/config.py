@@ -35,6 +35,7 @@ class Settings(BaseSettings):
 
     # OTP
     OTP_EXPIRE_MINUTES: int = 5
+    OTP__MINUTES:  int  =  1440
 
     # Super Admin
     SUPER_ADMIN_EMAIL: str = "admin@example.com"
