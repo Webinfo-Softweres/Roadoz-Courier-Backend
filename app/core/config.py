@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "Franchise Management System"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = True
-    ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:5173,http://localhost:5174,http://localhost:8000"
+    ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:5173,http://localhost:5174,http://localhost:8000,https://roadoz-frontend-prod.vercel.app"
 
     LOCATION_RADIUS_METERS: int = 100
 
