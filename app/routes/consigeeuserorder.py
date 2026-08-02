@@ -26,6 +26,7 @@ from app.utils.barcode import generate_barcode_base64
 from app.services.location_service import get_coordinates_from_address
 from app.services.notification_service import create_notification
 from app.models.delivery_assignment import DeliveryAssignment
+from app.models.pickup_assignment import PickupAssignment
 from app.models.order import OrderStatus,PaymentStatus
 from app.schemas.consignee_order_create import ConsigneeOrderCreatePayload
 from app.models.razorpay_transaction import RazorpayTransaction
@@ -572,6 +573,60 @@ async def get_my_orders(
         
         # Tracking history
         tracking_history = build_tracking_history(order)
+
+        # --- Delivery assignment → driver + vehicle ---
+        delivery_assignment = (await db.execute(
+            select(DeliveryAssignment)
+            .options(selectinload(DeliveryAssignment.driver), selectinload(DeliveryAssignment.vehicle))
+            .where(DeliveryAssignment.order_id == order.id, DeliveryAssignment.status != "cancelled")
+            .order_by(desc(DeliveryAssignment.created_at))
+        )).scalars().first()
+
+        driver_data = None
+        vehicle_data = None
+        if delivery_assignment:
+            if delivery_assignment.driver:
+                driver_data = OrderDriverResponse(
+                    id=delivery_assignment.driver.id,
+                    first_name=delivery_assignment.driver.first_name,
+                    last_name=delivery_assignment.driver.last_name,
+                    phone=delivery_assignment.driver.phone,
+                )
+            if delivery_assignment.vehicle:
+                vehicle_data = OrderVehicleResponse(
+                    id=delivery_assignment.vehicle.id,
+                    plate_number=delivery_assignment.vehicle.plate_number,
+                    make=delivery_assignment.vehicle.make,
+                    model=delivery_assignment.vehicle.model,
+                    type=delivery_assignment.vehicle.type,
+                )
+
+        # --- Pickup assignment → driver + vehicle ---
+        pickup_assignment = (await db.execute(
+            select(PickupAssignment)
+            .options(selectinload(PickupAssignment.driver), selectinload(PickupAssignment.vehicle))
+            .where(PickupAssignment.order_id == order.id, PickupAssignment.status != "cancelled")
+            .order_by(desc(PickupAssignment.created_at))
+        )).scalars().first()
+
+        pickup_driver_data = None
+        pickup_vehicle_data = None
+        if pickup_assignment:
+            if pickup_assignment.driver:
+                pickup_driver_data = OrderDriverResponse(
+                    id=pickup_assignment.driver.id,
+                    first_name=pickup_assignment.driver.first_name,
+                    last_name=pickup_assignment.driver.last_name,
+                    phone=pickup_assignment.driver.phone,
+                )
+            if pickup_assignment.vehicle:
+                pickup_vehicle_data = OrderVehicleResponse(
+                    id=pickup_assignment.vehicle.id,
+                    plate_number=pickup_assignment.vehicle.plate_number,
+                    make=pickup_assignment.vehicle.make,
+                    model=pickup_assignment.vehicle.model,
+                    type=pickup_assignment.vehicle.type,
+                )
         
         order_responses.append(OrderListResponse(
             id=order.id,
@@ -580,7 +635,7 @@ async def get_my_orders(
             status=order.status,
             previous_status=order.previous_status,
             payment_method=order.payment_method,
-            payment_status=order.payment_status,
+            payment_status=order.payment_status or "Payment_pending",
             cod_amount=float(order.cod_amount) if order.cod_amount else None,
             to_pay_amount=float(order.to_pay_amount) if order.to_pay_amount else None,
             credit_amount=float(order.credit_amount) if order.credit_amount else None,
@@ -602,7 +657,11 @@ async def get_my_orders(
             items=items_data,
             packages=packages_data,
             weight_summary=weight_summary,
-            tracking_history=tracking_history
+            tracking_history=tracking_history,
+            driver_details=driver_data,
+            vehicle_details=vehicle_data,
+            pickup_driver_details=pickup_driver_data,
+            pickup_vehicle_details=pickup_vehicle_data,
         ))
     
     total_pages = (total + limit - 1) // limit if total > 0 else 0
@@ -710,6 +769,33 @@ async def _build_order_detail_response(order, db) -> dict:
                 "make": delivery_assignment.vehicle.make,
                 "model": delivery_assignment.vehicle.model,
                 "type": delivery_assignment.vehicle.type,
+            }
+
+    # --- Pickup assignment -> driver + vehicle ---
+    pickup_assignment = (await db.execute(
+        select(PickupAssignment)
+        .options(selectinload(PickupAssignment.driver), selectinload(PickupAssignment.vehicle))
+        .where(PickupAssignment.order_id == order.id, PickupAssignment.status != "cancelled")
+        .order_by(desc(PickupAssignment.created_at))
+    )).scalars().first()
+
+    pickup_driver_data = None
+    pickup_vehicle_data = None
+    if pickup_assignment:
+        if pickup_assignment.driver:
+            pickup_driver_data = {
+                "id": pickup_assignment.driver.id,
+                "first_name": pickup_assignment.driver.first_name,
+                "last_name": pickup_assignment.driver.last_name,
+                "phone": pickup_assignment.driver.phone,
+            }
+        if pickup_assignment.vehicle:
+            pickup_vehicle_data = {
+                "id": pickup_assignment.vehicle.id,
+                "plate_number": pickup_assignment.vehicle.plate_number,
+                "make": pickup_assignment.vehicle.make,
+                "model": pickup_assignment.vehicle.model,
+                "type": pickup_assignment.vehicle.type,
             }
 
     # --- Build tracking timeline ---
@@ -863,6 +949,8 @@ async def _build_order_detail_response(order, db) -> dict:
         },
         "driver_details": driver_data,
         "vehicle_details": vehicle_data,
+        "pickup_driver_details": pickup_driver_data,
+        "pickup_vehicle_details": pickup_vehicle_data,
         "created_at": order.created_at,
         "updated_at": order.updated_at,
     }
@@ -965,6 +1053,32 @@ async def get_order_detail(
             "make": delivery_assignment.vehicle.make,
             "model": delivery_assignment.vehicle.model,
             "type": delivery_assignment.vehicle.type
+        }
+        
+    # Get Pickup Assignment (with driver and vehicle)
+    pickup_assignment = await db.execute(
+        select(PickupAssignment)
+        .options(selectinload(PickupAssignment.driver), selectinload(PickupAssignment.vehicle))
+        .where(PickupAssignment.order_id == order.id, PickupAssignment.status != "cancelled")
+        .order_by(desc(PickupAssignment.created_at))
+    )
+    pickup_assignment = pickup_assignment.scalars().first()
+    
+    pickup_driver_data = None
+    pickup_vehicle_data = None
+    if pickup_assignment and pickup_assignment.driver and pickup_assignment.vehicle:
+        pickup_driver_data = {
+            "id": pickup_assignment.driver.id,
+            "first_name": pickup_assignment.driver.first_name,
+            "last_name": pickup_assignment.driver.last_name,
+            "phone": pickup_assignment.driver.phone
+        }
+        pickup_vehicle_data = {
+            "id": pickup_assignment.vehicle.id,
+            "plate_number": pickup_assignment.vehicle.plate_number,
+            "make": pickup_assignment.vehicle.make,
+            "model": pickup_assignment.vehicle.model,
+            "type": pickup_assignment.vehicle.type
         }
     
     # ========== BUILD TRACKING HISTORY FROM ACTUAL SCANS ==========
@@ -1381,6 +1495,8 @@ async def get_order_detail(
     
     response["driver_details"] = driver_data
     response["vehicle_details"] = vehicle_data
+    response["pickup_driver_details"] = pickup_driver_data
+    response["pickup_vehicle_details"] = pickup_vehicle_data
     
     return response
 

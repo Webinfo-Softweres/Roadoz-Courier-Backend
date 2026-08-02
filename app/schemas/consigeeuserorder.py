@@ -136,6 +136,8 @@ class OrderListResponse(BaseModel):
     tracking_history: List[TrackingHistoryResponse]
     driver_details: Optional[OrderDriverResponse] = None
     vehicle_details: Optional[OrderVehicleResponse] = None
+    pickup_driver_details: Optional[OrderDriverResponse] = None
+    pickup_vehicle_details: Optional[OrderVehicleResponse] = None
     grand_total: Optional[float] = None          # total amount customer must pay (freight + insurance)
     razorpay_order_id: Optional[str] = None      # present for "Prepaid" orders
     razorpay_key_id: Optional[str] = None        # Razorpay publishable key for frontend checkout
