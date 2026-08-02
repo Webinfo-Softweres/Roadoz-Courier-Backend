@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import select,func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.models.order import OrderItem, OrderPackage, BagOrder
@@ -184,49 +184,121 @@ async def create_pickup_assignment(
 # LIST
 # ─────────────────────────────────────────────────────────────────────────────
 
+# @router.get("/list", response_model=PickupAssignmentListResponse)
+# async def list_pickup_assignments(
+#     order_id: Optional[str] = Query(None),
+#     status_filter: Optional[str] = Query(None, alias="status"),
+#     current_user: User = Depends(require_permission("pickup_assignment:view")),
+#     db: AsyncSession = Depends(get_db),
+# ):
+#     """List all pickup assignments with optional filters."""
+#     query = select(PickupAssignment)
+    
+#     # Role-based scoping
+#     franchise_id = await _resolve_franchise_id(db, current_user)
+#     if franchise_id:
+#         query = query.where(PickupAssignment.franchise_id == franchise_id)
+        
+#     warehouse_id = await _resolve_warehouse_id(db, current_user)
+#     if warehouse_id:
+#         query = query.where(PickupAssignment.warehouse_id == warehouse_id)
+
+#     if order_id:
+#         query = query.where(PickupAssignment.order_id == order_id)
+#     if status_filter:
+#         query = query.where(PickupAssignment.status == status_filter)
+
+    
+#     query = query.options(
+#         selectinload(PickupAssignment.order).selectinload(Order.items),
+#         selectinload(PickupAssignment.order).selectinload(Order.packages),
+#         selectinload(PickupAssignment.order).selectinload(Order.pickup_address),
+#         selectinload(PickupAssignment.order).selectinload(Order.consignee),
+#         selectinload(PickupAssignment.order).selectinload(Order.creator),
+#         selectinload(PickupAssignment.order).selectinload(Order.franchise),
+#         selectinload(PickupAssignment.order).selectinload(Order.bag_orders).selectinload(BagOrder.bag),
+#         selectinload(PickupAssignment.order).selectinload(Order.warehouse_addresses).selectinload(OrderWarehouseAddress.warehouse_address),
+#         selectinload(PickupAssignment.order).selectinload(Order.franchise_addresses).selectinload(OrderFranchiseAddress.franchise_address),
+#         selectinload(PickupAssignment.order).selectinload(Order.bulk_order),
+#         selectinload(PickupAssignment.driver),
+#         selectinload(PickupAssignment.vehicle)
+#     )
+#     result = await db.execute(query)
+#     items = result.scalars().all()
+#     return PickupAssignmentListResponse(
+#         total=len(items),
+#         items=[_map_pickup_assignment_out(a) for a in items],
+#     )
+
+
 @router.get("/list", response_model=PickupAssignmentListResponse)
 async def list_pickup_assignments(
     order_id: Optional[str] = Query(None),
     status_filter: Optional[str] = Query(None, alias="status"),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Items per page"),
     current_user: User = Depends(require_permission("pickup_assignment:view")),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all pickup assignments with optional filters."""
+    """List all pickup assignments with pagination."""
+
     query = select(PickupAssignment)
-    
+
     # Role-based scoping
     franchise_id = await _resolve_franchise_id(db, current_user)
     if franchise_id:
         query = query.where(PickupAssignment.franchise_id == franchise_id)
-        
+
     warehouse_id = await _resolve_warehouse_id(db, current_user)
     if warehouse_id:
         query = query.where(PickupAssignment.warehouse_id == warehouse_id)
 
     if order_id:
         query = query.where(PickupAssignment.order_id == order_id)
+
     if status_filter:
         query = query.where(PickupAssignment.status == status_filter)
 
-    
-    query = query.options(
-        selectinload(PickupAssignment.order).selectinload(Order.items),
-        selectinload(PickupAssignment.order).selectinload(Order.packages),
-        selectinload(PickupAssignment.order).selectinload(Order.pickup_address),
-        selectinload(PickupAssignment.order).selectinload(Order.consignee),
-        selectinload(PickupAssignment.order).selectinload(Order.creator),
-        selectinload(PickupAssignment.order).selectinload(Order.franchise),
-        selectinload(PickupAssignment.order).selectinload(Order.bag_orders).selectinload(BagOrder.bag),
-        selectinload(PickupAssignment.order).selectinload(Order.warehouse_addresses).selectinload(OrderWarehouseAddress.warehouse_address),
-        selectinload(PickupAssignment.order).selectinload(Order.franchise_addresses).selectinload(OrderFranchiseAddress.franchise_address),
-        selectinload(PickupAssignment.order).selectinload(Order.bulk_order),
-        selectinload(PickupAssignment.driver),
-        selectinload(PickupAssignment.vehicle)
+    # Total count before pagination
+    count_query = select(func.count()).select_from(query.subquery())
+    total = (await db.execute(count_query)).scalar()
+
+    # Pagination
+    offset = (page - 1) * limit
+
+    query = (
+        query.options(
+            selectinload(PickupAssignment.order).selectinload(Order.items),
+            selectinload(PickupAssignment.order).selectinload(Order.packages),
+            selectinload(PickupAssignment.order).selectinload(Order.pickup_address),
+            selectinload(PickupAssignment.order).selectinload(Order.consignee),
+            selectinload(PickupAssignment.order).selectinload(Order.creator),
+            selectinload(PickupAssignment.order).selectinload(Order.franchise),
+            selectinload(PickupAssignment.order)
+                .selectinload(Order.bag_orders)
+                .selectinload(BagOrder.bag),
+            selectinload(PickupAssignment.order)
+                .selectinload(Order.warehouse_addresses)
+                .selectinload(OrderWarehouseAddress.warehouse_address),
+            selectinload(PickupAssignment.order)
+                .selectinload(Order.franchise_addresses)
+                .selectinload(OrderFranchiseAddress.franchise_address),
+            selectinload(PickupAssignment.order).selectinload(Order.bulk_order),
+            selectinload(PickupAssignment.driver),
+            selectinload(PickupAssignment.vehicle),
+        )
+        .offset(offset)
+        .limit(limit)
     )
+
     result = await db.execute(query)
     items = result.scalars().all()
+
     return PickupAssignmentListResponse(
-        total=len(items),
+        total=total,
+        page=page,
+        limit=limit,
+        total_pages=(total + limit - 1) // limit,
         items=[_map_pickup_assignment_out(a) for a in items],
     )
 
