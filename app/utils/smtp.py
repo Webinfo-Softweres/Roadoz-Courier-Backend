@@ -126,7 +126,7 @@ async def send_assignment_otp_email(
                 </div>
 
                 <p style="color: #e74c3c; font-size: 13px; margin: 0 0 16px;">
-                    ⏰ This OTP expires in <strong>{settings.OTP_EXPIRE_MINUTES} minutes</strong>.
+                    ⏰ This OTP expires in <strong>{settings.OTP__MINUTES} minutes</strong>.
                 </p>
                 <p style="color: #777; font-size: 13px; line-height: 1.6;">
                     <strong>Do not share</strong> this OTP with anyone other than the verified Roadoz Courier personnel at your door.
