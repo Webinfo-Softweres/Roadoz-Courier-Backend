@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.models.order import OrderItem, OrderPackage, BagOrder
+from app.models.order import OrderStatus
 from app.models.warehouse import OrderWarehouseAddress
 from app.models.franchise import OrderFranchiseAddress
 from app.services.order_service import _build_order_out
@@ -157,8 +158,12 @@ async def create_pickup_assignment(
             created_by=current_user.id,
         )
         db.add(assignment)
+        # Update Order Status
+        order.status = OrderStatus.PICKUP_ASSIGNED.value
+        
         await db.commit()
         await db.refresh(assignment)
+        await db.refresh(order)
         created_assignments.append(assignment)
 
         # Send OTP email

@@ -32,8 +32,9 @@ class OrderStatus(str, Enum):
     PICKED = "Picked"           
     DISPATCHED = "Dispatched"
     WAREHOUSE = "Warehouse"
-    PENDING_APPROVAL = "Pending_approval"
+    PENDING_APPROVAL = "Pending"
     REJECTED = "Rejected"
+    PICKUP_ASSIGNED = "pickup_assigned"
 
 class PaymentStatus(str, Enum):
     PAYMENT_PENDING = "Payment_pending"
