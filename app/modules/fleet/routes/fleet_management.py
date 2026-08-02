@@ -374,3 +374,52 @@ async def delete_vehicle_endpoint(
     from app.modules.fleet.services.fleet_management_service import delete_vehicle
     await delete_vehicle(db, current_user, vehicle_id)
     await db.commit()
+
+
+@router.get("/fleet/drivers/{driver_id}/location")
+async def get_driver_location_details(
+    driver_id: str,
+    current_user: User = Depends(require_permission("drivers:view")),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get full location details from HERE API for a driver based on their latest synced location.
+    Role-based access:
+    - Admin: can query for any driver
+    - Franchise: can query only for their franchise's drivers
+    - Warehouse: can query only for their warehouse's drivers
+    """
+    from app.modules.fleet.models.driver import Driver
+    from app.modules.fleet.models.driver_location import DriverLocation
+    from sqlalchemy import select
+    from app.services.location_service import get_full_location_from_lat_lng
+    
+    # 1. Check role scope
+    _fid, _wid, _admin = await _get_role_scope(db, current_user)
+    
+    # 2. Verify driver existence and access rights
+    query = select(Driver).where(Driver.id == driver_id, Driver.deleted_at.is_(None))
+    if not _admin:
+        if _fid:
+            query = query.where(Driver.franchise_id == _fid)
+        elif _wid:
+            query = query.where(Driver.warehouse_id == _wid)
+            
+    driver = (await db.execute(query)).scalar_one_or_none()
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found or you do not have access to this driver.")
+        
+    # 3. Fetch latest coordinates from database
+    location = (await db.execute(
+        select(DriverLocation).where(DriverLocation.driver_id == driver_id)
+    )).scalar_one_or_none()
+    
+    if not location:
+        raise HTTPException(status_code=404, detail="No location data found for this driver yet.")
+
+    # 4. Fetch location details from HERE API
+    location_details = await get_full_location_from_lat_lng(location.latitude, location.longitude)
+    if not location_details:
+        raise HTTPException(status_code=400, detail="Could not retrieve location details from HERE API.")
+        
+    return location_details
