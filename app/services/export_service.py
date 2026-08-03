@@ -134,7 +134,37 @@ REPORT_CONFIGS = {
     "Performance Dashboard Report": {
         "headers": ["Parameter", "Current Month", "Previous Month", "Growth %"],
         "keys": ["parameter", "current_month", "previous_month", "growth_percent"]
-    }
+    },
+    "Driver Trip History Report": {
+        "headers": [
+            "Trip ID",
+            "Order ID",
+            "Completed Date",
+            "Completed Time",
+            "Pickup Hub",
+            "Customer Name",
+            "Delivery Address",
+            "Weight",
+            "Earnings (INR)",
+            "Payment Status",
+            "Payment Method",
+            "Trip Status",
+        ],
+        "keys": [
+            "trip_id",
+            "order_id",
+            "completed_date",
+            "completed_time",
+            "pickup_hub",
+            "customer_name",
+            "delivery_address",
+            "weight",
+            "earnings",
+            "payment_status",
+            "payment_method",
+            "trip_status",
+        ],
+    },
 }
 
 
