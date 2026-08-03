@@ -17,6 +17,7 @@ class RegisterRequest(BaseModel):
 
 class RegisterResponse(BaseModel):
     token: str
+    refreshToken: str
     userId: str
 
 

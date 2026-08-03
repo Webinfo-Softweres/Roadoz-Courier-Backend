@@ -57,6 +57,7 @@ async def refresh_token(request: RefreshTokenRequest, http_request: Request):
         "email": payload["email"],
         "role_id": payload.get("role_id"),
         "role": payload.get("role"),
+        "driver_id": payload.get("driver_id"),
         "permissions": list(payload.get("permissions") or []),
         "franchise_id": payload.get("franchise_id"),
         "franchise_code": payload.get("franchise_code"),
@@ -89,7 +90,7 @@ async def refresh_token(request: RefreshTokenRequest, http_request: Request):
         refresh_token=create_refresh_token(token_data),
         role=(
             {"id": payload.get("role_id"), "name": payload.get("role")}
-            if payload.get("role")
+            if payload.get("role") and payload.get("role_id")
             else None
         ),
         permissions=list(payload.get("permissions") or []),

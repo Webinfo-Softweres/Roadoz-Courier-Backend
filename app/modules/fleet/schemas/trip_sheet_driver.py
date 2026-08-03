@@ -122,6 +122,7 @@ class DriverProfileOut(BaseModel):
 
 class DriverAuthResponse(BaseModel):
     token: str
+    refreshToken: str
     userId: str
     driverId: str
 

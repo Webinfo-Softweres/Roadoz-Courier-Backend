@@ -48,6 +48,39 @@ async def test_register_returns_user_id():
         data = await _register_driver(client)
         uuid.UUID(data["userId"])
         assert data["token"]
+        assert data["refreshToken"]
+
+
+@pytest.mark.asyncio
+async def test_register_refresh_round_trip_keeps_driver_id():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        data = await _register_driver(client)
+        claims = decode_token(data["token"])
+        assert claims["type"] == "access"
+        assert claims["role"] == "driver"
+        assert claims["driver_id"]
+
+        refresh_resp = await client.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": data["refreshToken"]},
+        )
+        assert refresh_resp.status_code == 200
+        body = refresh_resp.json()
+        assert body["access_token"]
+        assert body["refresh_token"]
+
+        refreshed = decode_token(body["access_token"])
+        assert refreshed["type"] == "access"
+        assert refreshed["role"] == "driver"
+        assert refreshed["driver_id"] == claims["driver_id"]
+        assert refreshed["user_id"] == claims["user_id"]
+
+        profile = await client.get(
+            "/api/v1/driver/profile",
+            headers=_auth_headers(body["access_token"]),
+        )
+        assert profile.status_code == 200
+        assert profile.json()["success"] is True
 
 
 @pytest.mark.asyncio

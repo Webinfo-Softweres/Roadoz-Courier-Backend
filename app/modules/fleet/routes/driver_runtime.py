@@ -1,6 +1,6 @@
-from datetime import datetime
+from datetime import date, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,11 +32,13 @@ from app.modules.fleet.services.driver_trip_execution_service import (
 )
 from app.modules.fleet.services.driver_scan_service import execute_scan_for_driver, lookup_barcode_for_driver
 from app.modules.fleet.services.trip_sheet_driver_service import (
+    export_order_history,
     list_active_trips,
     list_new_trips,
     list_order_history,
     respond_to_sheet,
 )
+from app.services.export_service import export_to_csv, export_to_excel, export_to_pdf
 
 router = APIRouter(prefix="/api/v1/driver", tags=["Driver Runtime"])
 
@@ -221,6 +223,45 @@ async def orders_history(
     db: AsyncSession = Depends(get_db),
 ):
     return await list_order_history(db, driver, page, limit)
+
+
+@router.get("/orders/export")
+async def orders_export(
+    format: str = Query(..., description="pdf, csv, or excel"),
+    range: str | None = Query(None, description="this_week, this_month, last_month, or all"),
+    startDate: date | None = Query(None),
+    endDate: date | None = Query(None),
+    driver: Driver = Depends(require_driver),
+    db: AsyncSession = Depends(get_db),
+):
+    fmt = format.lower().strip()
+    if fmt not in {"pdf", "csv", "excel"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="format must be one of: pdf, csv, excel",
+        )
+    report_data = await export_order_history(db, driver, range, startDate, endDate)
+    items = report_data.get("items") or []
+    if not items:
+        return {"success": True, "data": {"rows": 0}}
+
+    if fmt == "csv":
+        return Response(
+            content=export_to_csv(report_data),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="trip_report.csv"'},
+        )
+    if fmt == "excel":
+        return Response(
+            content=export_to_excel(report_data),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": 'attachment; filename="trip_report.xlsx"'},
+        )
+    return Response(
+        content=export_to_pdf(report_data),
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="trip_report.pdf"'},
+    )
 
 
 @router.get("/scan/{barcode}", response_model=SuccessDataResponse)

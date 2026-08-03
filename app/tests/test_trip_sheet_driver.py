@@ -1,7 +1,9 @@
 """Trip sheet driver mobile API tests."""
 import uuid
+from datetime import date, datetime
 
 import pytest
+from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
@@ -11,8 +13,49 @@ from app.models.trip_sheet import TripSheet
 from app.models.user import User
 from app.modules.fleet.constants import SHEET_STATUS_PENDING_ACCEPT
 from app.modules.fleet.models.driver import Driver
+from app.modules.fleet.services.trip_sheet_driver_service import resolve_export_date_range
 from app.modules.fleet.services.trip_sheet_lifecycle import apply_driver_assignment_to_trip_sheet
 from app.tests.test_fleet_onboarding import _auth_headers, _register_driver
+
+
+def test_resolve_export_date_range_this_week_monday_start():
+    # Wednesday 2026-08-05 IST → week starts Monday 2026-08-03
+    now = datetime(2026, 8, 5, 14, 30, 0)
+    start_dt, end_dt, date_from, date_to = resolve_export_date_range("this_week", None, None, now=now)
+    assert date_from == date(2026, 8, 3)
+    assert date_to == date(2026, 8, 5)
+    assert start_dt == datetime(2026, 8, 3, 0, 0, 0)
+    assert end_dt.date() == date(2026, 8, 5)
+
+
+def test_resolve_export_date_range_custom_wins_over_range():
+    start_dt, end_dt, date_from, date_to = resolve_export_date_range(
+        "this_month",
+        date(2026, 8, 1),
+        date(2026, 8, 7),
+    )
+    assert date_from == date(2026, 8, 1)
+    assert date_to == date(2026, 8, 7)
+    assert start_dt == datetime(2026, 8, 1, 0, 0, 0)
+    assert end_dt.date() == date(2026, 8, 7)
+
+
+def test_resolve_export_date_range_all_has_no_bounds():
+    start_dt, end_dt, date_from, date_to = resolve_export_date_range("all", None, None)
+    assert start_dt is None and end_dt is None
+    assert date_from is None and date_to is None
+
+
+def test_resolve_export_date_range_requires_range_without_dates():
+    with pytest.raises(HTTPException) as exc:
+        resolve_export_date_range(None, None, None)
+    assert exc.value.status_code == 400
+
+
+def test_resolve_export_date_range_partial_custom_rejected():
+    with pytest.raises(HTTPException) as exc:
+        resolve_export_date_range("all", date(2026, 8, 1), None)
+    assert exc.value.status_code == 400
 
 
 @pytest.mark.asyncio
@@ -38,7 +81,6 @@ async def test_apply_driver_assignment_sets_pending_accept():
     apply_driver_assignment_to_trip_sheet(sheet, driver_id, reset=True)
     assert sheet.driver_id == driver_id
     assert sheet.driver_status == SHEET_STATUS_PENDING_ACCEPT
-
 
 @pytest.mark.asyncio
 async def test_driver_list_new_trips_when_online():

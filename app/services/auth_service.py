@@ -108,11 +108,24 @@ async def authenticate_user(db: AsyncSession, request: LoginRequest, http_reques
     )
     permissions = [r[0] for r in perm_rows.all()] if role else []
 
+    driver_id = None
+    if role_name == "driver":
+        from app.modules.fleet.models.driver import Driver
+
+        driver = (
+            await db.execute(
+                select(Driver).where(Driver.user_id == user.id, Driver.deleted_at.is_(None))
+            )
+        ).scalar_one_or_none()
+        if driver:
+            driver_id = driver.id
+
     token_data = {
         "user_id": user.id,
         "email": user.email,
         "role_id": role.id if role else None,
         "role": role.name if role else None,
+        "driver_id": driver_id,
         "permissions": permissions,
         "franchise_id": franchise.id if franchise else None,
         "franchise_code": franchise.franchise_code if franchise else None,

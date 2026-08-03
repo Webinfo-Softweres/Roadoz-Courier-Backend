@@ -21,7 +21,7 @@ from app.modules.fleet.schemas.onboard import (
 )
 from app.modules.fleet.services.driver_service import documents_complete
 from app.modules.fleet.services.file_service import ALLOWED_DOCUMENT_TYPES, get_driver_documents
-from app.utils.jwt import create_access_token
+from app.utils.jwt import create_access_token, create_refresh_token
 
 
 async def _get_driver_role(db: AsyncSession) -> Role:
@@ -74,16 +74,19 @@ async def register_driver(db: AsyncSession, data: RegisterRequest) -> RegisterRe
     role = await _get_driver_role(db)
     db.add(UserRole(user_id=user.id, role_id=role.id))
 
-    token = create_access_token(
-        {
-            "user_id": user.id,
-            "email": user.email,
-            "driver_id": driver.id,
-            "role": "driver",
-            "franchise_id": None,
-        }
+    claims = {
+        "user_id": user.id,
+        "email": user.email,
+        "driver_id": driver.id,
+        "role": "driver",
+        "role_id": role.id,
+        "franchise_id": None,
+    }
+    return RegisterResponse(
+        token=create_access_token(claims),
+        refreshToken=create_refresh_token(claims),
+        userId=user.id,
     )
-    return RegisterResponse(token=token, userId=user.id)
 
 
 async def _build_steps(db: AsyncSession, driver: Driver) -> OnboardingSteps:
