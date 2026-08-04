@@ -34,6 +34,9 @@ async def driver_verify_otp_login(db: AsyncSession, phone: str, otp: str) -> Dri
     ).scalar_one_or_none()
     if not driver:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a driver account")
+    if driver.onboarding_status == "approved":
+        driver.online = True
+        await db.flush()
     claims = {
         "user_id": user.id,
         "email": user.email,
