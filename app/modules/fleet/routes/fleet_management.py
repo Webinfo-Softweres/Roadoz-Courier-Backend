@@ -442,14 +442,15 @@ async def list_driver_locations(
     current_user: User = Depends(require_permission("drivers:view")),
     db: AsyncSession = Depends(get_db),
     status: Optional[str] = Query(None, description="Filter by driver status (e.g. active, draft)"),
-    online_only: bool = Query(False, description="If true, only return drivers who are currently online"),
+    online_only: bool = Query(True, description="Show only online drivers. Set to false to include all drivers."),
 ):
     """
-    List all drivers with their latest location data (lat, lng, speed, heading, accuracy).
+    List all currently ONLINE drivers with their live location, current vehicle, and assignment status.
+    By default only online drivers are returned. Set online_only=false to include offline drivers.
     Role-based access:
-    - Admin: sees ALL drivers across all franchises/warehouses
+    - Admin : sees ALL drivers across all franchises/warehouses
     - Franchise: sees only drivers belonging to their franchise
-    - Warehouse: sees only drivers belonging to their warehouse
+    - Warehouse : sees only drivers belonging to their warehouse
     """
     from app.modules.fleet.models.driver import Driver
     from app.modules.fleet.models.driver_location import DriverLocation
@@ -462,7 +463,7 @@ async def list_driver_locations(
     # 1. Resolve role scope
     _fid, _wid, _admin = await _get_role_scope(db, current_user)
 
-    # 2. Build driver query scoped by role, eagerly loading vehicle
+    # 2. Build driver query scoped by role
     query = (
         select(Driver)
         .options(selectinload(Driver.vehicle))
@@ -478,6 +479,8 @@ async def list_driver_locations(
 
     if status:
         query = query.where(Driver.status == status)
+
+    # Always filter online drivers unless caller explicitly passes online_only=false
     if online_only:
         query = query.where(Driver.online == True)
 
