@@ -36,33 +36,31 @@ async def get_pending_orders(
     _: User = Depends(require_permission("user_orders:approve")),
 ):
     """
-    Get all pending approval orders for the authenticated franchise.
+    Get all pending approval orders for the authenticated user.
     """
-    franchise = await _get_franchise_for_user(db, current_user.id)
-    if not franchise and current_user.franchise_id:
-        franchise = (await db.execute(select(Franchise).where(Franchise.id == current_user.franchise_id))).scalar_one_or_none()
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+    is_super_admin = (franchise_id is None and warehouse_id is None)
         
-    if not franchise:
-        raise HTTPException(status_code=403, detail="User does not belong to a franchise")
-        
-    query = select(Order).where(
-        Order.franchise_id == franchise.id,
-        Order.status == OrderStatus.PENDING_APPROVAL.value
-    )
+    base_filter = [Order.status == OrderStatus.PENDING_APPROVAL.value]
+    if not is_super_admin:
+        if franchise_id:
+            base_filter.append(Order.franchise_id == franchise_id)
+        elif warehouse_id:
+            base_filter.append(Order.warehouse_id == warehouse_id)
+
+    from sqlalchemy import and_, func
+    query = select(Order).where(and_(*base_filter))
     
     if search:
         query = query.where(Order.order_number.ilike(f"%{search}%"))
         
     # Get total count
-    count_query = select(Order.id).where(
-        Order.franchise_id == franchise.id,
-        Order.status == OrderStatus.PENDING_APPROVAL.value
-    )
+    count_query = select(func.count(Order.id)).where(and_(*base_filter))
     if search:
         count_query = count_query.where(Order.order_number.ilike(f"%{search}%"))
         
-    total_result = await db.execute(count_query)
-    total = len(total_result.scalars().all())
+    total = (await db.execute(count_query)).scalar_one()
     
     # Apply pagination
     query = query.order_by(desc(Order.created_at))
@@ -160,12 +158,9 @@ async def reject_order(
     """
     Reject a pending order.
     """
-    franchise = await _get_franchise_for_user(db, current_user.id)
-    if not franchise and current_user.franchise_id:
-        franchise = (await db.execute(select(Franchise).where(Franchise.id == current_user.franchise_id))).scalar_one_or_none()
-        
-    if not franchise:
-        raise HTTPException(status_code=403, detail="User does not belong to a franchise")
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+    is_super_admin = (franchise_id is None and warehouse_id is None)
         
     query = select(Order).where(Order.id == order_id).options(
         selectinload(Order.items),
@@ -184,8 +179,11 @@ async def reject_order(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
         
-    if order.franchise_id != franchise.id:
-        raise HTTPException(status_code=403, detail="Order does not belong to your franchise")
+    if not is_super_admin:
+        if franchise_id and order.franchise_id != franchise_id:
+            raise HTTPException(status_code=403, detail="Order does not belong to your franchise")
+        if warehouse_id and order.warehouse_id != warehouse_id:
+            raise HTTPException(status_code=403, detail="Order does not belong to your warehouse")
         
     if order.status != OrderStatus.PENDING_APPROVAL.value:
         raise HTTPException(status_code=400, detail="Order is not in PENDING_APPROVAL status")
@@ -296,12 +294,9 @@ async def get_franchise_order_details(
     """
     Get details of an order for a franchise.
     """
-    franchise = await _get_franchise_for_user(db, current_user.id)
-    if not franchise and current_user.franchise_id:
-        franchise = (await db.execute(select(Franchise).where(Franchise.id == current_user.franchise_id))).scalar_one_or_none()
-        
-    if not franchise:
-        raise HTTPException(status_code=403, detail="User does not belong to a franchise")
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+    is_super_admin = (franchise_id is None and warehouse_id is None)
         
     query = select(Order).where(Order.id == order_id).options(
         selectinload(Order.items),
@@ -320,8 +315,11 @@ async def get_franchise_order_details(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
         
-    if order.franchise_id != franchise.id:
-        raise HTTPException(status_code=403, detail="Order does not belong to your franchise")
+    if not is_super_admin:
+        if franchise_id and order.franchise_id != franchise_id:
+            raise HTTPException(status_code=403, detail="Order does not belong to your franchise")
+        if warehouse_id and order.warehouse_id != warehouse_id:
+            raise HTTPException(status_code=403, detail="Order does not belong to your warehouse")
         
     from app.services.order_service import _build_order_out
     return _build_order_out(order)

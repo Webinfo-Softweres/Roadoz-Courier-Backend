@@ -287,6 +287,63 @@ async def get_available_franchises(
     ]
 
 
+@router.get("/warehouses")
+async def get_available_warehouses(
+    city:    str | None = Query(None, description="Filter by city"),
+    state:   str | None = Query(None, description="Filter by state"),
+    pincode: str | None = Query(None, description="Filter by pincode"),
+    search:  str | None = Query(None, description="Search by name, city, or pincode"),
+    db: AsyncSession = Depends(get_db),
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """
+    List all warehouses available for order creation.
+    Supports filtering by city, state, pincode, or a free-text search.
+    Used by the customer to choose a warehouse when placing an order.
+    """
+    query = select(WareHouseAddress)
+
+    if city:
+        query = query.where(WareHouseAddress.city.ilike(f"%{city}%"))
+
+    if state:
+        query = query.where(WareHouseAddress.state.ilike(f"%{state}%"))
+
+    if pincode:
+        query = query.where(WareHouseAddress.pincode == pincode)
+
+    if search:
+        query = query.where(
+            or_(
+                WareHouseAddress.nickname.ilike(f"%{search}%"),
+                WareHouseAddress.city.ilike(f"%{search}%"),
+                WareHouseAddress.pincode.ilike(f"%{search}%"),
+                WareHouseAddress.contact_name.ilike(f"%{search}%"),
+            )
+        )
+
+    query = query.order_by(WareHouseAddress.nickname)
+    warehouses = (await db.execute(query)).scalars().all()
+
+    return [
+        {
+            "id": w.id,
+            "warehouse_id": w.id,
+            "name": w.nickname,
+            "contact_name": w.contact_name,
+            "phone": w.phone,
+            "email": w.email,
+            "address_line_1": w.address_line_1,
+            "address_line_2": w.address_line_2,
+            "city": w.city,
+            "state": w.state,
+            "pincode": w.pincode,
+            "country": w.country,
+            "latitude": float(w.latitude) if w.latitude else None,
+            "longitude": float(w.longitude) if w.longitude else None,
+        }
+        for w in warehouses
+    ]
 
 
 @router.get("/my-pickup-addresses", response_model=List[PickupAddressResponse])
@@ -1507,24 +1564,43 @@ async def create_consignee_order(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    # 1. Validate franchise
-    franchise = (await db.execute(select(Franchise).where(Franchise.id == data.franchise_id))).scalar_one_or_none()
-    if not franchise:
-        raise HTTPException(status_code=400, detail="Invalid franchise ID")
-        
+    # 1. Validate franchise OR warehouse — exactly one will be set (validated by schema)
+    owner_user_id = None      # the User.id used as created_by / user_id on children
+    resolved_franchise_id = None
+    resolved_warehouse_id = None
+
+    if data.franchise_id:
+        franchise = (await db.execute(
+            select(Franchise).where(Franchise.id == data.franchise_id)
+        )).scalar_one_or_none()
+        if not franchise:
+            raise HTTPException(status_code=400, detail="Invalid franchise ID")
+        owner_user_id = franchise.user_id
+        resolved_franchise_id = franchise.id
+
+    else:  # warehouse_id
+        warehouse = (await db.execute(
+            select(WareHouseAddress).where(WareHouseAddress.id == data.warehouse_id)
+        )).scalar_one_or_none()
+        if not warehouse:
+            raise HTTPException(status_code=400, detail="Invalid warehouse ID")
+        owner_user_id = warehouse.user_id
+        resolved_warehouse_id = warehouse.id
+
     # 2. Handle Pickup Address (Sender)
     pickup = None
     if data.pickup_address_id:
-        pickup = (await db.execute(
-            select(PickupAddress).where(
-                PickupAddress.id == data.pickup_address_id,
-                PickupAddress.franchise_id == franchise.id
-            )
-        )).scalar_one_or_none()
+        pickup_q = select(PickupAddress).where(PickupAddress.id == data.pickup_address_id)
+        if resolved_franchise_id:
+            pickup_q = pickup_q.where(PickupAddress.franchise_id == resolved_franchise_id)
+        else:
+            pickup_q = pickup_q.where(PickupAddress.warehouse_id == resolved_warehouse_id)
+        pickup = (await db.execute(pickup_q)).scalar_one_or_none()
         if not pickup:
-            raise HTTPException(status_code=404, detail="Pickup address not found under selected franchise")
+            scope = "franchise" if resolved_franchise_id else "warehouse"
+            raise HTTPException(status_code=404, detail=f"Pickup address not found under selected {scope}")
+
     elif data.sender_details:
-        # Check for duplicates under this franchise
         pickup_conditions = []
         if data.sender_details.email:
             pickup_conditions.append(PickupAddress.email == data.sender_details.email)
@@ -1532,13 +1608,13 @@ async def create_consignee_order(
             pickup_conditions.append(PickupAddress.phone == data.sender_details.phone)
 
         if pickup_conditions:
-            pickup = (await db.execute(
-                select(PickupAddress).where(
-                    PickupAddress.franchise_id == franchise.id,
-                    or_(*pickup_conditions)
-                )
-            )).scalars().first()
-            
+            dup_q = select(PickupAddress)
+            if resolved_franchise_id:
+                dup_q = dup_q.where(PickupAddress.franchise_id == resolved_franchise_id, or_(*pickup_conditions))
+            else:
+                dup_q = dup_q.where(PickupAddress.warehouse_id == resolved_warehouse_id, or_(*pickup_conditions))
+            pickup = (await db.execute(dup_q)).scalars().first()
+
         if not pickup:
             lat, lng = None, None
             try:
@@ -1549,12 +1625,13 @@ async def create_consignee_order(
                     lat, lng = loc["lat"], loc["lng"]
             except Exception:
                 pass
-                
+
             pickup = PickupAddress(
                 id=str(uuid.uuid4()),
-                user_id=franchise.user_id,
+                user_id=owner_user_id,
                 auth_user_id=current_user.id,
-                franchise_id=franchise.id,
+                franchise_id=resolved_franchise_id,
+                warehouse_id=resolved_warehouse_id,
                 nickname=data.sender_details.nickname,
                 contact_name=data.sender_details.contact_name,
                 phone=data.sender_details.phone,
@@ -1578,14 +1655,16 @@ async def create_consignee_order(
     # 3. Handle Consignee (Receiver)
     consignee = None
     if data.consignee_id:
-        consignee = (await db.execute(
-            select(Consignee).where(
-                Consignee.id == data.consignee_id,
-                Consignee.franchise_id == franchise.id
-            )
-        )).scalar_one_or_none()
+        consignee_q = select(Consignee).where(Consignee.id == data.consignee_id)
+        if resolved_franchise_id:
+            consignee_q = consignee_q.where(Consignee.franchise_id == resolved_franchise_id)
+        else:
+            consignee_q = consignee_q.where(Consignee.warehouse_id == resolved_warehouse_id)
+        consignee = (await db.execute(consignee_q)).scalar_one_or_none()
         if not consignee:
-            raise HTTPException(status_code=404, detail="Consignee not found under selected franchise")
+            scope = "franchise" if resolved_franchise_id else "warehouse"
+            raise HTTPException(status_code=404, detail=f"Consignee not found under selected {scope}")
+
     elif data.receiver_details:
         consignee_conditions = []
         if data.receiver_details.email:
@@ -1594,13 +1673,13 @@ async def create_consignee_order(
             consignee_conditions.append(Consignee.mobile == data.receiver_details.mobile)
 
         if consignee_conditions:
-            consignee = (await db.execute(
-                select(Consignee).where(
-                    Consignee.franchise_id == franchise.id,
-                    or_(*consignee_conditions)
-                )
-            )).scalars().first()
-        
+            cdup_q = select(Consignee)
+            if resolved_franchise_id:
+                cdup_q = cdup_q.where(Consignee.franchise_id == resolved_franchise_id, or_(*consignee_conditions))
+            else:
+                cdup_q = cdup_q.where(Consignee.warehouse_id == resolved_warehouse_id, or_(*consignee_conditions))
+            consignee = (await db.execute(cdup_q)).scalars().first()
+
         if not consignee:
             clat, clng = None, None
             try:
@@ -1614,9 +1693,10 @@ async def create_consignee_order(
 
             consignee = Consignee(
                 id=str(uuid.uuid4()),
-                user_id=franchise.user_id,
+                user_id=owner_user_id,
                 auth_user_id=current_user.id,
-                franchise_id=franchise.id,
+                franchise_id=resolved_franchise_id,
+                warehouse_id=resolved_warehouse_id,
                 name=data.receiver_details.name,
                 mobile=data.receiver_details.mobile,
                 alternate_mobile=data.receiver_details.alternate_mobile,
@@ -1636,11 +1716,7 @@ async def create_consignee_order(
 
     # 4. Generate order number
     order_number = await _generate_order_number(db)
-    
-    # We use franchise.user_id as the created_by for the order to bypass the foreign key constraint
-    # that requires created_by to be a valid user from the 'users' table, not 'auth_users'.
-    # Alternatively, if there's a system admin user, we could use that. We'll use the franchise owner.
-    
+
     order = Order(
         id=str(uuid.uuid4()),
         order_number=order_number,
@@ -1662,10 +1738,10 @@ async def create_consignee_order(
         regional_area=data.regional_area,
         payment_status=PaymentStatus.PAYMENT_PENDING.value,
         status=OrderStatus.PENDING_APPROVAL.value,
-        previous_status= OrderStatus.PENDING_APPROVAL.value,
-        created_by=franchise.user_id, # Link to franchise owner's user ID
-        franchise_id=franchise.id,
-        warehouse_id=None
+        previous_status=OrderStatus.PENDING_APPROVAL.value,
+        created_by=owner_user_id,
+        franchise_id=resolved_franchise_id,
+        warehouse_id=resolved_warehouse_id
     )
     
     db.add(order)

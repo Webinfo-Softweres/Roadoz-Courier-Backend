@@ -21,6 +21,9 @@ class Consignee(Base):
     franchise_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("franchises.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    warehouse_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("warehouse_addresses.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     name: Mapped[str] = mapped_column(String(150), nullable=False)
     mobile: Mapped[str] = mapped_column(String(20), nullable=False)

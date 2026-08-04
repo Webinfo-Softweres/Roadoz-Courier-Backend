@@ -5,7 +5,9 @@ from app.schemas.order import PickupAddressCreate, ConsigneeCreate
 
 
 class ConsigneeOrderCreatePayload(BaseModel):
-    franchise_id: str = Field(..., description="The ID of the franchise chosen to process this order")
+    # Customer must choose exactly one destination: franchise OR warehouse
+    franchise_id: Optional[str] = Field(None, description="ID of the franchise chosen to process this order")
+    warehouse_id: Optional[str] = Field(None, description="ID of the warehouse chosen to process this order")
     
     # Pick existing by ID...
     pickup_address_id: Optional[str] = Field(None, description="ID of existing sender's pickup address")
@@ -26,6 +28,12 @@ class ConsigneeOrderCreatePayload(BaseModel):
 
     @model_validator(mode="after")
     def _validate_addresses_and_payments(self):
+        # Exactly one of franchise_id or warehouse_id must be provided
+        if not self.franchise_id and not self.warehouse_id:
+            raise ValueError("Either franchise_id or warehouse_id must be provided")
+        if self.franchise_id and self.warehouse_id:
+            raise ValueError("Provide only one of franchise_id or warehouse_id, not both")
+
         if not self.pickup_address_id and not self.sender_details:
             raise ValueError("Either pickup_address_id or sender_details must be provided")
         if not self.consignee_id and not self.receiver_details:
