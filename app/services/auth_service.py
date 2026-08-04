@@ -119,6 +119,9 @@ async def authenticate_user(db: AsyncSession, request: LoginRequest, http_reques
         ).scalar_one_or_none()
         if driver:
             driver_id = driver.id
+            if driver.onboarding_status == "approved":
+                driver.online = True
+                await db.flush()
 
     token_data = {
         "user_id": user.id,

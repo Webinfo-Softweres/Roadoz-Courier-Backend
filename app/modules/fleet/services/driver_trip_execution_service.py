@@ -22,8 +22,6 @@ from app.modules.fleet.services.trip_sheet_driver_service import (
     mark_sheet_in_progress,
     maybe_complete_sheet,
 )
-from app.utils.location import haversine_distance
-from app.core.config import settings
 
 
 async def get_trip_detail(db: AsyncSession, driver: Driver, order_id: str) -> dict:
@@ -58,16 +56,6 @@ async def verify_pickup(
     db: AsyncSession, driver: Driver, order_id: str, payload: VerifyPickupRequest
 ) -> dict:
     sheet, order = await get_order_on_driver_sheet(db, driver, order_id)
-    if payload.location and order.pickup_address:
-        lat = payload.location.get("latitude")
-        lng = payload.location.get("longitude")
-        if lat is not None and lng is not None and order.pickup_address.latitude is not None:
-            dist = haversine_distance(
-                float(lat), float(lng),
-                float(order.pickup_address.latitude), float(order.pickup_address.longitude or 0),
-            )
-            if dist > settings.LOCATION_RADIUS_METERS:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Not at pickup location")
     order.previous_status = order.status
     order.status = OrderStatus.PICKED.value
     await mark_sheet_in_progress(db, sheet)
@@ -85,16 +73,6 @@ async def verify_drop(
     db: AsyncSession, driver: Driver, order_id: str, payload: VerifyDropRequest
 ) -> dict:
     sheet, order = await get_order_on_driver_sheet(db, driver, order_id)
-    if payload.location and order.consignee and order.consignee.latitude is not None:
-        lat = payload.location.get("latitude")
-        lng = payload.location.get("longitude")
-        if lat is not None and lng is not None:
-            dist = haversine_distance(
-                float(lat), float(lng),
-                float(order.consignee.latitude), float(order.consignee.longitude or 0),
-            )
-            if dist > settings.LOCATION_RADIUS_METERS:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Not at delivery location")
 
     existing = await db.execute(select(PodRecord).where(PodRecord.order_id == order.id))
     pod = existing.scalar_one_or_none()
