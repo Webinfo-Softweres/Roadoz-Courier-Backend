@@ -3,11 +3,25 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_password_hash
+from app.models.role import Role
 from app.models.user import User
 from app.modules.fleet.models.driver import Driver
 from app.modules.fleet.schemas.trip_sheet_driver import DriverAuthResponse, ResetPasswordRequest
 from app.services.otp_service import send_otp, verify_otp
-from app.utils.jwt import create_access_token
+from app.utils.jwt import create_access_token, create_refresh_token
+
+
+async def _driver_role_id(db: AsyncSession) -> str | None:
+    role = (
+        await db.execute(
+            select(Role).where(
+                Role.name == "driver",
+                Role.franchise_id.is_(None),
+                Role.warehouse_id.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    return role.id if role else None
 
 
 async def driver_verify_otp_login(db: AsyncSession, phone: str, otp: str) -> DriverAuthResponse:
@@ -20,15 +34,19 @@ async def driver_verify_otp_login(db: AsyncSession, phone: str, otp: str) -> Dri
     ).scalar_one_or_none()
     if not driver:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a driver account")
-    token = create_access_token(
-        {
-            "user_id": user.id,
-            "email": user.email,
-            "driver_id": driver.id,
-            "role": "driver",
-        }
+    claims = {
+        "user_id": user.id,
+        "email": user.email,
+        "driver_id": driver.id,
+        "role": "driver",
+        "role_id": await _driver_role_id(db),
+    }
+    return DriverAuthResponse(
+        token=create_access_token(claims),
+        refreshToken=create_refresh_token(claims),
+        userId=user.id,
+        driverId=driver.id,
     )
-    return DriverAuthResponse(token=token, userId=user.id, driverId=driver.id)
 
 
 async def resend_driver_otp(phone: str) -> dict:

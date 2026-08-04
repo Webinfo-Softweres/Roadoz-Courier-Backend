@@ -444,6 +444,7 @@ DEFAULT_ORIGINS = [
     "https://admin.roadozcourier.com",
     "https://staging.roadozcourier.com",
     "https://staging-admin.roadozcourier.com",
+    "https://roadoz-frontend-prod.vercel.app",
 ]
 
 all_origins = set(DEFAULT_ORIGINS)
@@ -456,7 +457,7 @@ origins = list(all_origins)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?|https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
