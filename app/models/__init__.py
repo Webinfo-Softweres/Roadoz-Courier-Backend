@@ -32,3 +32,9 @@ from app.models import warehouse
 from app.models import webconfiguration
 from app.models import month_end_closing
 from app.models.trip_sheet import TripSheet, TripSheetOrder
+from app.models.driver_payment_collection import DriverPaymentCollection
+from app.models.order_intransit import OrderInTransit
+from app.models.pickup_assignment import PickupAssignment
+from app.models.delivery_assignment import DeliveryAssignment
+
+from app.models.razorpay_transaction import RazorpayTransaction

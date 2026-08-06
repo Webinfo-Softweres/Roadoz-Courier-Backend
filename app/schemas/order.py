@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field, model_validator, computed_field
 from typing import Optional, List, Literal
 from datetime import datetime
 from enum import Enum
-from app.models.order import OrderStatus
+from app.models.order import OrderStatus,PaymentStatus
 from datetime import date
 from app.schemas.franchise import FranchiseResponse
 from app.schemas.user import UserResponse
@@ -336,6 +336,7 @@ class OrderOut(BaseModel):
     pickup_address: PickupAddressOut
     consignee: ConsigneeOut
     payment_method: str
+    payment_status:str 
     cod_amount: Optional[float] = None
     to_pay_amount: Optional[float] = None
     credit_amount: Optional[float] = None

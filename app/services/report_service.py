@@ -140,7 +140,7 @@ async def _scope_franchise_id(db: AsyncSession, current_user: User, franchise_id
     return resolved
 
 
-def _order_filters(scoped_franchise_id: str | None, date_from: date | None, date_to: date | None, scoped_warehouse_id: str | None = None) -> list[Any]:
+def _order_filters(scoped_franchise_id: str | None, date_from: date | None, date_to: date | None, scoped_warehouse_id: str | None = None, payment_method: str | None = None) -> list[Any]:
     start, end = _date_range(date_from, date_to)
     filters = []
     if scoped_franchise_id:
@@ -151,6 +151,8 @@ def _order_filters(scoped_franchise_id: str | None, date_from: date | None, date
         filters.append(Order.created_at >= start)
     if end:
         filters.append(Order.created_at <= end)
+    if payment_method:
+        filters.append(Order.payment_method == payment_method)
     return filters
 
 
@@ -166,7 +168,7 @@ async def daily_booking_report(
     date_from: date | None = None,
     date_to: date | None = None,
     franchise_id: str | None = None,
-) -> dict:
+    payment_method: str | None = None) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
 
@@ -183,6 +185,8 @@ async def daily_booking_report(
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
     elif scoped_warehouse_id:
         additional_filters.append(Order.warehouse_id == scoped_warehouse_id)
+    if payment_method:
+        additional_filters.append(Order.payment_method == payment_method)
 
     # Calculate opening_amount: sum of shipping_charge BEFORE start_date
     _, _, opening_amount = await _resolve_dates_and_opening(
@@ -190,7 +194,7 @@ async def daily_booking_report(
     )
 
     # Fetch orders for the full date range (start_date → end_date inclusive)
-    filters = _order_filters(scoped_franchise_id, start_date, end_date, scoped_warehouse_id)
+    filters = _order_filters(scoped_franchise_id, start_date, end_date, scoped_warehouse_id, payment_method)
     result = await db.execute(
         select(Order)
         .where(and_(*filters))
@@ -210,6 +214,7 @@ async def daily_booking_report(
             "fuel_surcharge": _to_float(float(order.freight_charge) - (float(order.freight_charge) / 1.52)) if getattr(order, 'freight_charge', None) else 0.0,
             "gst_amount": _to_float(order.freight_gst) if getattr(order, 'freight_gst', None) else 0.0,
             "status": _status_value(order.status),
+            "payment_method": order.payment_method,
         }
         for order in orders
     ]
@@ -235,7 +240,7 @@ async def customer_wise_booking_report(
     date_from: date | None = None,
     date_to: date | None = None,
     franchise_id: str | None = None,
-) -> dict:
+    payment_method: str | None = None) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     if date_from or date_to:
@@ -249,16 +254,19 @@ async def customer_wise_booking_report(
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
     elif scoped_warehouse_id:
         additional_filters.append(Order.warehouse_id == scoped_warehouse_id)
+    if payment_method:
+        additional_filters.append(Order.payment_method == payment_method)
 
     _, _, opening_vals = await _resolve_dates_and_opening(
         db, Order, Order.created_at, start_date, end_date, [Order.shipping_charge, Order.cod_amount], additional_filters
     )
 
-    filters = _order_filters(scoped_franchise_id, start_date, end_date, scoped_warehouse_id)
+    filters = _order_filters(scoped_franchise_id, start_date, end_date, scoped_warehouse_id, payment_method)
     rows = (
         await db.execute(
             select(
                 Consignee.name,
+                Order.payment_method,
                 func.count(Order.id),
                 func.coalesce(func.sum(Order.shipping_charge), 0),
                 func.coalesce(func.sum(Order.cod_amount), 0),
@@ -267,7 +275,7 @@ async def customer_wise_booking_report(
             )
             .join(Consignee, Order.consignee_id == Consignee.id)
             .where(and_(*filters))
-            .group_by(Consignee.name)
+            .group_by(Consignee.name, Order.payment_method)
             .order_by(func.coalesce(func.sum(Order.shipping_charge), 0).desc())
         )
     ).all()
@@ -275,12 +283,13 @@ async def customer_wise_booking_report(
     items = [
         {
             "customer": row[0],
-            "bookings": row[1],
-            "revenue": _to_float(row[2]),
-            "base_freight": _to_float(float(row[4]) / 1.52) if row[4] else 0.0,
-            "fuel_surcharge": _to_float(float(row[4]) - (float(row[4]) / 1.52)) if row[4] else 0.0,
-            "gst_amount": _to_float(row[5]),
-            "pending_amount": _to_float(row[3]),
+            "payment_method": row[1],
+            "bookings": row[2],
+            "revenue": _to_float(row[3]),
+            "base_freight": _to_float(float(row[5]) / 1.52) if row[5] else 0.0,
+            "fuel_surcharge": _to_float(float(row[5]) - (float(row[5]) / 1.52)) if row[5] else 0.0,
+            "gst_amount": _to_float(row[6]),
+            "pending_amount": _to_float(row[4]),
         }
         for row in rows
     ]
@@ -307,7 +316,7 @@ async def service_type_report(
     date_from: date | None = None,
     date_to: date | None = None,
     franchise_id: str | None = None,
-) -> dict:
+    payment_method: str | None = None) -> dict:
     scoped_franchise_id = await _scope_franchise_id(db, current_user, franchise_id)
     scoped_warehouse_id = await _scope_warehouse_id(db, current_user)
     if date_from or date_to:
@@ -321,34 +330,38 @@ async def service_type_report(
         additional_filters.append(Order.franchise_id == scoped_franchise_id)
     elif scoped_warehouse_id:
         additional_filters.append(Order.warehouse_id == scoped_warehouse_id)
+    if payment_method:
+        additional_filters.append(Order.payment_method == payment_method)
 
     _, _, opening_revenue = await _resolve_dates_and_opening(
         db, Order, Order.created_at, start_date, end_date, Order.shipping_charge, additional_filters
     )
 
-    filters = _order_filters(scoped_franchise_id, start_date, end_date, scoped_warehouse_id)
+    filters = _order_filters(scoped_franchise_id, start_date, end_date, scoped_warehouse_id, payment_method)
     rows = (
         await db.execute(
             select(
                 Order.service_type,
+                Order.payment_method,
                 func.count(Order.id),
                 func.coalesce(func.sum(Order.shipping_charge), 0),
                 func.coalesce(func.sum(Order.freight_charge), 0),
                 func.coalesce(func.sum(Order.freight_gst), 0),
             )
             .where(and_(*filters))
-            .group_by(Order.service_type)
+            .group_by(Order.service_type, Order.payment_method)
         )
     ).all()
 
     items = [
         {
             "service_type": row[0],
-            "total_bookings": row[1],
-            "revenue": _to_float(row[2]),
-            "base_freight": _to_float(float(row[3]) / 1.52) if row[3] else 0.0,
-            "fuel_surcharge": _to_float(float(row[3]) - (float(row[3]) / 1.52)) if row[3] else 0.0,
-            "gst_amount": _to_float(row[4]),
+            "payment_method": row[1],
+            "total_bookings": row[2],
+            "revenue": _to_float(row[3]),
+            "base_freight": _to_float(float(row[4]) / 1.52) if row[4] else 0.0,
+            "fuel_surcharge": _to_float(float(row[4]) - (float(row[4]) / 1.52)) if row[4] else 0.0,
+            "gst_amount": _to_float(row[5]),
         }
         for row in rows
     ]

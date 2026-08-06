@@ -71,8 +71,34 @@ class WeightSummaryResponse(BaseModel):
 class TrackingHistoryResponse(BaseModel):
     stage: str
     status: str
-    pincode: str
-    timestamp: datetime
+    status_display: Optional[str] = None
+    description: Optional[str] = None
+    location: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    pincode: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_phone: Optional[str] = None
+    timestamp: Optional[datetime] = None
+    formatted_date: Optional[str] = None
+    is_current: Optional[bool] = False
+    icon: Optional[str] = None
+    scan_id: Optional[str] = None
+    scan_type: Optional[str] = None
+
+class OrderDriverResponse(BaseModel):
+    id: str
+    first_name: str
+    last_name: str
+    phone: Optional[str]
+
+class OrderVehicleResponse(BaseModel):
+    id: str
+    plate_number: str
+    make: str
+    model: str
+    type: str
 
 class OrderListResponse(BaseModel):
     id: str
@@ -89,7 +115,12 @@ class OrderListResponse(BaseModel):
     total_vol_weight_kg: float
     applicable_weight_kg: float
     total_boxes: int
-    shipping_charge: float
+    # Freight breakdown
+    freight_charge: Optional[float] = None      # Base freight (before GST)
+    freight_gst: Optional[float] = None         # GST on freight (18%)
+    total_freight: Optional[float] = None       # freight_charge + freight_gst
+    insurance: Optional[float] = None           # Insurance charge (1.8% of order_value)
+    shipping_charge: float                      # Legacy field = total_freight
     gst_number: Optional[str]
     eway_bill_number: Optional[str]
     barcode: Optional[str]
@@ -103,6 +134,15 @@ class OrderListResponse(BaseModel):
     packages: List[PackageResponse]
     weight_summary: WeightSummaryResponse
     tracking_history: List[TrackingHistoryResponse]
+    driver_details: Optional[OrderDriverResponse] = None
+    vehicle_details: Optional[OrderVehicleResponse] = None
+    pickup_driver_details: Optional[OrderDriverResponse] = None
+    pickup_vehicle_details: Optional[OrderVehicleResponse] = None
+    grand_total: Optional[float] = None          # total amount customer must pay (freight + insurance)
+    razorpay_order_id: Optional[str] = None      # present for "Prepaid" orders
+    razorpay_key_id: Optional[str] = None        # Razorpay publishable key for frontend checkout
+    payment_status: Optional[str] = None         # created | paid | failed (from RazorpayTransaction)
+
 
 class PaginatedOrdersResponse(BaseModel):
     items: List[OrderListResponse]

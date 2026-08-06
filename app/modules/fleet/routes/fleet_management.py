@@ -69,8 +69,20 @@ class DriverOut(BaseModel):
     onboarding_status: str
     status:            str
     franchise_id:      Optional[str] = None
+    warehouse_id:      Optional[str] = None
+    vehicle_id:        Optional[str] = None
+    online:            bool
 
     model_config = {"from_attributes": True}
+
+
+class DriverListResponse(BaseModel):
+    items: List[DriverOut]
+    total_drivers: int
+    on_road_drivers: int
+    page:  int
+    limit: int
+    pages: int
 
 
 class VehicleOut(BaseModel):
@@ -374,3 +386,243 @@ async def delete_vehicle_endpoint(
     from app.modules.fleet.services.fleet_management_service import delete_vehicle
     await delete_vehicle(db, current_user, vehicle_id)
     await db.commit()
+
+
+@router.get("/fleet/drivers/{driver_id}/location")
+async def get_driver_location_details(
+    driver_id: str,
+    current_user: User = Depends(require_permission("drivers:view")),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get full location details from HERE API for a driver based on their latest synced location.
+    Role-based access:
+    - Admin: can query for any driver
+    - Franchise: can query only for their franchise's drivers
+    - Warehouse: can query only for their warehouse's drivers
+    """
+    from app.modules.fleet.models.driver import Driver
+    from app.modules.fleet.models.driver_location import DriverLocation
+    from sqlalchemy import select
+    from app.services.location_service import get_full_location_from_lat_lng
+    
+    # 1. Check role scope
+    _fid, _wid, _admin = await _get_role_scope(db, current_user)
+    
+    # 2. Verify driver existence and access rights
+    query = select(Driver).where(Driver.id == driver_id, Driver.deleted_at.is_(None))
+    if not _admin:
+        if _fid:
+            query = query.where(Driver.franchise_id == _fid)
+        elif _wid:
+            query = query.where(Driver.warehouse_id == _wid)
+            
+    driver = (await db.execute(query)).scalar_one_or_none()
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found or you do not have access to this driver.")
+        
+    # 3. Fetch latest coordinates from database
+    location = (await db.execute(
+        select(DriverLocation).where(DriverLocation.driver_id == driver_id)
+    )).scalar_one_or_none()
+    
+    if not location:
+        raise HTTPException(status_code=404, detail="No location data found for this driver yet.")
+
+    # 4. Fetch location details from HERE API
+    location_details = await get_full_location_from_lat_lng(location.latitude, location.longitude)
+    if not location_details:
+        raise HTTPException(status_code=400, detail="Could not retrieve location details from HERE API.")
+        
+    return location_details
+
+
+@router.get("/fleet/drivers/locations")
+async def list_driver_locations(
+    current_user: User = Depends(require_permission("drivers:view")),
+    db: AsyncSession = Depends(get_db),
+    status: Optional[str] = Query(None, description="Filter by driver status (e.g. active, draft)"),
+    online_only: bool = Query(True, description="Show only online drivers. Set to false to include all drivers."),
+):
+    """
+    List all currently ONLINE drivers with their live location, current vehicle, and assignment status.
+    By default only online drivers are returned. Set online_only=false to include offline drivers.
+    Role-based access:
+    - Admin : sees ALL drivers across all franchises/warehouses
+    - Franchise: sees only drivers belonging to their franchise
+    - Warehouse : sees only drivers belonging to their warehouse
+    """
+    from app.modules.fleet.models.driver import Driver
+    from app.modules.fleet.models.driver_location import DriverLocation
+    from app.models.delivery_assignment import DeliveryAssignment
+    from app.models.pickup_assignment import PickupAssignment
+    from app.models.trip_sheet import TripSheet
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    # 1. Resolve role scope
+    _fid, _wid, _admin = await _get_role_scope(db, current_user)
+
+    # 2. Build driver query scoped by role
+    query = (
+        select(Driver)
+        .options(selectinload(Driver.vehicle))
+        .where(Driver.deleted_at.is_(None))
+    )
+    if not _admin:
+        if _fid:
+            query = query.where(Driver.franchise_id == _fid)
+        elif _wid:
+            query = query.where(Driver.warehouse_id == _wid)
+        else:
+            raise HTTPException(status_code=403, detail="Access denied.")
+
+    if status:
+        query = query.where(Driver.status == status)
+
+    # Always filter online drivers unless caller explicitly passes online_only=false
+    if online_only:
+        query = query.where(Driver.online == True)
+
+    drivers = (await db.execute(query)).scalars().all()
+
+    if not drivers:
+        return []
+
+    driver_ids = [d.id for d in drivers]
+
+    # 3. Fetch all DriverLocation records for those drivers in one query
+    locations_result = await db.execute(
+        select(DriverLocation).where(DriverLocation.driver_id.in_(driver_ids))
+    )
+    locations_map = {loc.driver_id: loc for loc in locations_result.scalars().all()}
+
+    # 4. Fetch active assignments to determine current vehicle
+    da_result = await db.execute(
+        select(DeliveryAssignment)
+        .options(selectinload(DeliveryAssignment.vehicle))
+        .where(DeliveryAssignment.driver_id.in_(driver_ids), DeliveryAssignment.status.in_(["assigned", "in_progress"]))
+    )
+    da_map = {da.driver_id: da.vehicle for da in da_result.scalars().all() if da.vehicle}
+
+    pa_result = await db.execute(
+        select(PickupAssignment)
+        .options(selectinload(PickupAssignment.vehicle))
+        .where(PickupAssignment.driver_id.in_(driver_ids), PickupAssignment.status.in_(["assigned", "in_progress"]))
+    )
+    pa_map = {pa.driver_id: pa.vehicle for pa in pa_result.scalars().all() if pa.vehicle}
+
+    ts_result = await db.execute(
+        select(TripSheet)
+        .options(selectinload(TripSheet.vehicle))
+        .where(TripSheet.driver_id.in_(driver_ids), TripSheet.driver_status.in_(["accepted", "started", "in_progress"]))
+    )
+    ts_map = {ts.driver_id: ts.vehicle for ts in ts_result.scalars().all() if ts.vehicle}
+
+    # 5. Build response
+    response = []
+    for driver in drivers:
+        loc = locations_map.get(driver.id)
+        
+        # Determine current vehicle (Trip > Delivery > Pickup > Default profile vehicle)
+        v = ts_map.get(driver.id) or da_map.get(driver.id) or pa_map.get(driver.id) or driver.vehicle
+        
+        response.append({
+            "driver": {
+                "id": driver.id,
+                "first_name": driver.first_name,
+                "last_name": driver.last_name,
+                "phone": driver.phone,
+                "status": driver.status,
+                "online": driver.online,
+                "franchise_id": driver.franchise_id,
+                "warehouse_id": driver.warehouse_id,
+            },
+            "vehicle": {
+                "id": v.id,
+                "type": v.type,
+                "plate_number": v.plate_number,
+                "make": v.make,
+                "model": v.model,
+                "year": v.year,
+                "color": v.color,
+                "status": v.status,
+            } if v else None,
+            "location": {
+                "lat": loc.latitude,
+                "lng": loc.longitude,
+                "speed": loc.speed,
+                "heading": loc.heading,
+                "accuracy": loc.accuracy,
+                "last_updated": loc.updated_at,
+            } if loc else None,
+        })
+
+    return response
+
+
+
+
+# ─── Driver Document & Bank Detail Endpoints ──────────────────────────────────
+
+@router.get("/fleet/drivers", response_model=DriverListResponse)
+async def list_drivers_endpoint(
+    page:          int            = Query(1,    ge=1),
+    limit:         int            = Query(20,   ge=1, le=100),
+    status_filter: Optional[str]  = Query(None, alias="status"),
+    db:            AsyncSession   = Depends(get_db),
+    current_user:  User           = Depends(get_current_user),
+    _:             User           = Depends(require_permission("drivers:view")),
+):
+    """
+    List drivers (paginated) with total counts and on-road counts.
+    - Admin / Warehouse → all drivers globally.
+    - Franchise user    → only drivers belonging to their franchise.
+    """
+    from app.modules.fleet.models.driver import Driver
+    from sqlalchemy import select, func
+
+    _fid, _wid, _admin = await _get_role_scope(db, current_user)
+
+    # Base query for all drivers in scope
+    query = select(Driver).where(Driver.deleted_at.is_(None))
+    if not _admin:
+        if _fid:
+            query = query.where(Driver.franchise_id == _fid)
+        elif _wid:
+            query = query.where(Driver.warehouse_id == _wid)
+        else:
+            raise HTTPException(status_code=403, detail="Access denied.")
+
+    # Calculate totals before applying pagination and specific filters
+    total_result = await db.execute(select(func.count()).select_from(query.subquery()))
+    total_drivers = total_result.scalar() or 0
+
+    onroad_result = await db.execute(
+        select(func.count()).select_from(query.where(Driver.online == True).subquery())
+    )
+    on_road_drivers = onroad_result.scalar() or 0
+
+    # Apply filters
+    if status_filter:
+        query = query.where(Driver.status == status_filter)
+
+    # Calculate filtered total for pagination
+    filtered_total_result = await db.execute(select(func.count()).select_from(query.subquery()))
+    filtered_total = filtered_total_result.scalar() or 0
+
+    # Pagination
+    offset = (page - 1) * limit
+    query = query.order_by(Driver.created_at.desc()).offset(offset).limit(limit)
+
+    drivers = (await db.execute(query)).scalars().all()
+    pages = (filtered_total + limit - 1) // limit if filtered_total > 0 else 0
+
+    return DriverListResponse(
+        items=drivers,
+        total_drivers=total_drivers,
+        on_road_drivers=on_road_drivers,
+        page=page,
+        limit=limit,
+        pages=pages
+    )

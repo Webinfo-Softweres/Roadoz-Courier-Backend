@@ -17,7 +17,13 @@ from app.middleware.auth_middleware import RequestLoggingMiddleware, SecurityHea
 from app.routes import auth, franchise, profile, websocket, rbac, order, remittance, invoice,warehouse, activity_log,consigeeauth,coningeereview,webconfiguration,notification
 from app.routes import auth, franchise, profile, websocket, rbac, order, remittance, invoice,warehouse, activity_log,consigeeauth,coningeereview,webconfiguration, analytics,user_admincommunication, rate_calculator, reports, prints, operations, location
 from app.routes import bulk_order, bag,label,user_franchise,consigeeuserorder, month_end_closing
+from app.routes import franchise_orders
+from app.routes import pickup_assignment as pickup_assignment_routes
+from app.routes import delivery_assignment as delivery_assignment_routes
+
+from app.routes import public as public_routes
 from app.modules.fleet.routes import mobile as fleet_mobile
+from app.modules.fleet.routes.driver_runtime import router as fleet_driver_runtime
 from app.modules.fleet.routes import admin as fleet_admin
 from app.modules.fleet.routes import fleet_management
 from app.models.activity_log import ActivityLog
@@ -29,6 +35,7 @@ from app.websocket.user_admin_chat import router as websocket_router
 from app.websocket.notification_socket import router as ws_router
 
 from app.websocket.trip_sheet_socket import router as trip_sheet_ws_router
+from app.websocket.driver_socket import router as driver_ws_router
 
 
 logging.basicConfig(
@@ -170,7 +177,16 @@ DEFAULT_PERMISSIONS = [
     ("tripsheet", "view", "View trip sheets"),
     ("tripsheet", "update", "Update trip sheets"),
     ("tripsheet", "delete", "Delete trip sheets"),
-
+    # Pickup Assignment
+    ("pickup_assignment", "create", "Create pickup assignments"),
+    ("pickup_assignment", "view", "View pickup assignments"),
+    # Delivery Assignment
+    ("delivery_assignment", "create", "Create delivery assignments"),
+    ("delivery_assignment", "view", "View delivery assignments"),
+    
+    # user orders 
+    ("user_orders", "approve", "Approve orders"),
+    ("user_orders", "reject", "Reject orders"), 
 ]
 
 
@@ -411,20 +427,37 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 # ── Middleware ───────────────────────────────────────────────────────────────
 
 
-origins = [
+DEFAULT_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:3001",
+    "http://localhost:3002",
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://localhost:8000",
+    "http://localhost:8080",
+    "http://localhost:8081",
     "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://127.0.0.1:5173",
     "https://www.roadozcourier.com",
     "https://roadozcourier.com",
     "https://admin.roadozcourier.com",
     "https://staging.roadozcourier.com",
-    "https://staging-admin.roadozcourier.com"
+    "https://staging-admin.roadozcourier.com",
+    "https://roadoz-frontend-prod.vercel.app",
 ]
+
+all_origins = set(DEFAULT_ORIGINS)
+for origin in settings.allowed_origins_list:
+    if origin and origin.strip():
+        all_origins.add(origin.strip())
+
+origins = list(all_origins)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?|https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -439,6 +472,7 @@ app.add_middleware(MaintenanceMiddleware)
 
 API_PREFIX = "/api/v1"
 app.include_router(auth.router,      prefix=API_PREFIX)
+app.include_router(public_routes.router, prefix=API_PREFIX)
 app.include_router(franchise.router, prefix=API_PREFIX)
 app.include_router(profile.router,   prefix=API_PREFIX)
 app.include_router(rbac.router,      prefix=API_PREFIX)
@@ -469,7 +503,13 @@ app.include_router(label.router,prefix=API_PREFIX)
 app.include_router(user_franchise.router,prefix=API_PREFIX)
 app.include_router(consigeeuserorder.router,prefix=API_PREFIX)
 app.include_router(month_end_closing.router,prefix=API_PREFIX)
+app.include_router(pickup_assignment_routes.router, prefix=API_PREFIX)
+app.include_router(delivery_assignment_routes.router, prefix=API_PREFIX)
+app.include_router(franchise_orders.router, prefix=API_PREFIX)
+
 app.include_router(fleet_mobile.router)
+app.include_router(fleet_driver_runtime)
+app.include_router(driver_ws_router, prefix=API_PREFIX)
 app.include_router(fleet_admin.router, prefix="/api/v1/int/fleet")
 app.include_router(fleet_management.router, prefix=API_PREFIX)
 

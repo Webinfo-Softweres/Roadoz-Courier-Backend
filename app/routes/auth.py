@@ -11,6 +11,7 @@ from app.schemas.auth import (
     VerifyOTPRequest,
     OTPResponse,
 )
+from app.modules.fleet.schemas.trip_sheet_driver import DriverOtpLoginRequest, ForgotPasswordRequest, ResetPasswordRequest
 from app.services.auth_service import authenticate_user, get_user_role_by_email
 from app.services.otp_service import send_otp, verify_otp
 from app.utils.jwt import verify_refresh_token, create_access_token, create_refresh_token
@@ -56,6 +57,7 @@ async def refresh_token(request: RefreshTokenRequest, http_request: Request):
         "email": payload["email"],
         "role_id": payload.get("role_id"),
         "role": payload.get("role"),
+        "driver_id": payload.get("driver_id"),
         "permissions": list(payload.get("permissions") or []),
         "franchise_id": payload.get("franchise_id"),
         "franchise_code": payload.get("franchise_code"),
@@ -88,7 +90,7 @@ async def refresh_token(request: RefreshTokenRequest, http_request: Request):
         refresh_token=create_refresh_token(token_data),
         role=(
             {"id": payload.get("role_id"), "name": payload.get("role")}
-            if payload.get("role")
+            if payload.get("role") and payload.get("role_id")
             else None
         ),
         permissions=list(payload.get("permissions") or []),
@@ -147,3 +149,34 @@ async def verify_otp_endpoint(request: VerifyOTPRequest):
     """
     await verify_otp(request.identifier, request.otp, request.purpose)
     return {"message": "OTP verified successfully", "verified": True}
+
+
+@router.post("/driver/verify-otp")
+async def driver_verify_otp_endpoint(body: DriverOtpLoginRequest, db: AsyncSession = Depends(get_db)):
+    from app.modules.fleet.services.driver_auth_service import driver_verify_otp_login
+
+    return await driver_verify_otp_login(db, body.phone, body.otp)
+
+
+@router.post("/resend-otp", response_model=OTPResponse)
+async def resend_otp_endpoint(request: SendOTPRequest):
+    if not request.phone and not request.email:
+        raise HTTPException(status_code=400, detail="Provide phone or email")
+    identifier = request.phone or request.email
+    via = "sms" if request.phone else "email"
+    await send_otp(identifier, request.purpose or "login", via=via)
+    return OTPResponse(message=f"OTP resent to {identifier}", expires_in=settings.OTP_EXPIRE_MINUTES * 60)
+
+
+@router.post("/forgot-password")
+async def forgot_password_endpoint(body: ForgotPasswordRequest):
+    from app.modules.fleet.services.driver_auth_service import forgot_password_request
+
+    return await forgot_password_request(body.email)
+
+
+@router.post("/reset-password")
+async def reset_password_endpoint(body: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
+    from app.modules.fleet.services.driver_auth_service import reset_password_with_otp
+
+    return await reset_password_with_otp(db, body)

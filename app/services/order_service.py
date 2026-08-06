@@ -23,7 +23,7 @@ from app.models.franchise import Franchise,OrderFranchiseAddress
 from app.models.pickup_address import PickupAddress
 from app.models.consignee import Consignee
 from app.models.warehouse import WareHouseAddress,OrderWarehouseAddress
-from app.models.order import Order, OrderItem, OrderPackage, OrderStatus, BulkOrder,Bag,BagOrder
+from app.models.order import Order, OrderItem, OrderPackage, OrderStatus, BulkOrder,Bag,BagOrder, PaymentStatus
 from app.models.role import Role
 from app.models.user_role import UserRole
 
@@ -289,6 +289,7 @@ def _build_order_out(order: Order) -> OrderOut:
         pickup_address=PickupAddressOut.model_validate(order.pickup_address),
         consignee=ConsigneeOut.model_validate(order.consignee),
         payment_method=order.payment_method,
+        payment_status=order.payment_status or PaymentStatus.PAYMENT_PENDING.value,
         cod_amount=float(order.cod_amount) if order.cod_amount is not None else None,
         to_pay_amount=float(order.to_pay_amount) if order.to_pay_amount is not None else None,
         credit_amount=float(order.credit_amount) if order.credit_amount is not None else None,
@@ -334,7 +335,8 @@ async def search_pickup_addresses(
     page: int = 1,
     limit: int = 10,) -> PickupAddressListResponse:
     franchise_id = await _resolve_franchise_id(db, current_user)
-    is_global = not current_user.franchise_id and not await _get_franchise_for_user(db, current_user.id) and not await _get_warehouse_for_user(db, current_user.id)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+    is_global = (franchise_id is None and warehouse_id is None)
     
     query = select(PickupAddress)
     count_query = select(func.count()).select_from(PickupAddress)
@@ -343,6 +345,9 @@ async def search_pickup_addresses(
         if franchise_id:
             query = query.where(PickupAddress.franchise_id == franchise_id)
             count_query = count_query.where(PickupAddress.franchise_id == franchise_id)
+        elif warehouse_id:
+            query = query.where(PickupAddress.warehouse_id == warehouse_id)
+            count_query = count_query.where(PickupAddress.warehouse_id == warehouse_id)
         else:
             query = query.where(PickupAddress.user_id == current_user.id)
             count_query = count_query.where(PickupAddress.user_id == current_user.id)
@@ -380,6 +385,7 @@ async def create_pickup_address(
     db: AsyncSession, data: PickupAddressCreate, current_user: User
 ) -> PickupAddressOut:
     franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
 
     address_str = f"{data.address_line_1}, {data.city}, {data.state} {data.pincode}, {data.country}"
     coords = await get_coordinates_from_address(address_str)
@@ -388,6 +394,7 @@ async def create_pickup_address(
         id=str(uuid.uuid4()),
         user_id=current_user.id,
         franchise_id=franchise_id,
+        warehouse_id=warehouse_id,
         nickname=data.nickname,
         contact_name=data.contact_name,
         phone=data.phone,
@@ -418,10 +425,16 @@ async def update_pickup_address(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pickup address not found")
 
     franchise_id = await _resolve_franchise_id(db, current_user)
-    if franchise_id and addr.franchise_id != franchise_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    elif not franchise_id and addr.user_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+    is_global = (franchise_id is None and warehouse_id is None)
+    
+    if not is_global:
+        if franchise_id and addr.franchise_id != franchise_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        if warehouse_id and addr.warehouse_id != warehouse_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        if not franchise_id and not warehouse_id and addr.user_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     if data.nickname is not None:
         addr.nickname = data.nickname
@@ -489,10 +502,16 @@ async def delete_pickup_address(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pickup address not found")
 
     franchise_id = await _resolve_franchise_id(db, current_user)
-    if franchise_id and addr.franchise_id != franchise_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    elif not franchise_id and addr.user_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+    is_global = (franchise_id is None and warehouse_id is None)
+    
+    if not is_global:
+        if franchise_id and addr.franchise_id != franchise_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        if warehouse_id and addr.warehouse_id != warehouse_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        if not franchise_id and not warehouse_id and addr.user_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     # Get all orders using this address
     orders = await db.execute(
@@ -550,7 +569,8 @@ async def search_consignees(
     limit: int = 25,
 ) -> ConsigneeListResponse:
     franchise_id = await _resolve_franchise_id(db, current_user)
-    is_global = not current_user.franchise_id and not await _get_franchise_for_user(db, current_user.id) and not await _get_warehouse_for_user(db, current_user.id)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+    is_global = (franchise_id is None and warehouse_id is None)
 
     query = select(Consignee)
     count_query = select(func.count()).select_from(Consignee)
@@ -559,6 +579,9 @@ async def search_consignees(
         if franchise_id:
             query = query.where(Consignee.franchise_id == franchise_id)
             count_query = count_query.where(Consignee.franchise_id == franchise_id)
+        elif warehouse_id:
+            query = query.where(Consignee.warehouse_id == warehouse_id)
+            count_query = count_query.where(Consignee.warehouse_id == warehouse_id)
         else:
             query = query.where(Consignee.user_id == current_user.id)
             count_query = count_query.where(Consignee.user_id == current_user.id)
@@ -590,6 +613,7 @@ async def create_consignee(
     db: AsyncSession, data: ConsigneeCreate, current_user: User
 ) -> ConsigneeOut:
     franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
 
     address_str = f"{data.address_line_1}, {data.city}, {data.state} {data.pincode}"
     coords = await get_coordinates_from_address(address_str)
@@ -598,6 +622,7 @@ async def create_consignee(
         id=str(uuid.uuid4()),
         user_id=current_user.id,
         franchise_id=franchise_id,
+        warehouse_id=warehouse_id,
         name=data.name,
         mobile=data.mobile,
         alternate_mobile=data.alternate_mobile,
@@ -625,10 +650,16 @@ async def update_consignee(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Consignee not found")
 
     franchise_id = await _resolve_franchise_id(db, current_user)
-    if franchise_id and consignee.franchise_id != franchise_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    elif not franchise_id and consignee.user_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+    is_global = (franchise_id is None and warehouse_id is None)
+    
+    if not is_global:
+        if franchise_id and consignee.franchise_id != franchise_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        if warehouse_id and consignee.warehouse_id != warehouse_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        if not franchise_id and not warehouse_id and consignee.user_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     # Update only provided fields
     if data.name is not None:
@@ -666,12 +697,18 @@ async def delete_consignee(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Consignee not found")
 
     franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+    is_global = (franchise_id is None and warehouse_id is None)
 
     # Role-based access:
-    # - super_admin (franchise_id is None) → global access, no restriction
-    # - Franchise user (franchise_id is set) → can only delete consignees in their franchise
-    if franchise_id and consignee.franchise_id != franchise_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    # - super_admin (is_global) -> global access, no restriction
+    # - Franchise user (franchise_id is set) -> can only delete consignees in their franchise
+    # - Warehouse user (warehouse_id is set) -> can only delete consignees in their warehouse
+    if not is_global:
+        if franchise_id and consignee.franchise_id != franchise_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        if warehouse_id and consignee.warehouse_id != warehouse_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     # Check if consignee is linked to any order
     order_exists = await db.scalar(select(Order.id).where(Order.consignee_id == consignee.id).limit(1))

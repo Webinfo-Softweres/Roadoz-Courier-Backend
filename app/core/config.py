@@ -4,6 +4,8 @@ import secrets
 
 
 class Settings(BaseSettings):
+    RAZORPAY_KEY_ID: str = ""
+    RAZORPAY_SECRET_KEY: str = ""
     # Database (SQLite by default — swap for postgresql+asyncpg://... in production)
     DATABASE_URL: str = "sqlite+aiosqlite:///./franchise.db"
     
@@ -33,6 +35,7 @@ class Settings(BaseSettings):
 
     # OTP
     OTP_EXPIRE_MINUTES: int = 5
+    OTP__MINUTES:  int  =  1440
 
     # Super Admin
     SUPER_ADMIN_EMAIL: str = "admin@example.com"
@@ -43,7 +46,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "Franchise Management System"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = True
-    ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:8000"
+    ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:5173,http://localhost:5174,http://localhost:8000,https://roadoz-frontend-prod.vercel.app"
 
     LOCATION_RADIUS_METERS: int = 100
 
