@@ -188,6 +188,14 @@ DEFAULT_PERMISSIONS = [
     # user orders 
     ("user_orders", "approve", "Approve orders"),
     ("user_orders", "reject", "Reject orders"), 
+    
+    # parcel order
+    ("parcel", "create", "parcel orders"),
+    ("parcel", "view", "Reject orders"),  
+    ("parcel", "edit", "parcel orders"),
+    ("parcel", "delete", "Reject orders"),   
+    
+    
 ]
 
 
