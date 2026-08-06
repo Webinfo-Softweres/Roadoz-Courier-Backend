@@ -202,23 +202,42 @@ async def daily_booking_report(
     )
     orders = result.scalars().all()
 
-    items = [
-        {
+    items = []
+    for order in orders:
+        pm = order.payment_method
+        payment_val = 0.0
+        if pm == 'COD':
+            payment_val = getattr(order, 'cod_amount', 0.0) or 0.0
+        elif pm == 'Prepaid':
+            payment_val = getattr(order, 'prepaid_amount', 0.0) or 0.0
+        elif pm == 'To Pay':
+            payment_val = getattr(order, 'to_pay_amount', 0.0) or 0.0
+        elif pm == 'Credit':
+            payment_val = getattr(order, 'credit_amount', 0.0) or 0.0
+
+        freight_charge = getattr(order, 'freight_charge', 0.0) or 0.0
+        freight_gst = getattr(order, 'freight_gst', 0.0) or 0.0
+        insurance = getattr(order, 'insurance', 0.0) or 0.0
+        regional_area = getattr(order, 'regional_area', 0.0) or 0.0
+
+        amount = float(payment_val) + float(freight_charge) + float(freight_gst) + float(insurance) + float(regional_area)
+
+        items.append({
             "booking_no": order.order_number,
             "sender": order.pickup_address.contact_name if order.pickup_address else None,
             "receiver": order.consignee.name if order.consignee else None,
             "destination": order.consignee.city if order.consignee else None,
             "weight": _to_float(order.applicable_weight_kg),
-            "amount": _to_float(order.shipping_charge),
-            "base_freight": _to_float(float(order.freight_charge) / 1.52) if getattr(order, 'freight_charge', None) else 0.0,
-            "fuel_surcharge": _to_float(float(order.freight_charge) - (float(order.freight_charge) / 1.52)) if getattr(order, 'freight_charge', None) else 0.0,
-            "gst_amount": _to_float(order.freight_gst) if getattr(order, 'freight_gst', None) else 0.0,
+            "payment_method_amount": _to_float(payment_val),
+            "insurance": _to_float(insurance),
+            "regional_area": _to_float(regional_area),
+            "totalamount": _to_float(amount),
+            "base_freight": _to_float(freight_charge) if freight_charge else 0.0,
+            "gst_amount": _to_float(freight_gst),
             "status": _status_value(order.status),
             "payment_method": order.payment_method,
-        }
-        for order in orders
-    ]
-    total_amount = _to_float(sum(item["amount"] for item in items))
+        })
+    total_amount = _to_float(sum(item["totalamount"] for item in items))
 
     return {
         "report": "Daily Booking Report",
@@ -262,21 +281,35 @@ async def customer_wise_booking_report(
     )
 
     filters = _order_filters(scoped_franchise_id, start_date, end_date, scoped_warehouse_id, payment_method)
+    # Define the derived amount formula
+    derived_amount = (
+        func.coalesce(Order.cod_amount, 0) +
+        func.coalesce(Order.prepaid_amount, 0) +
+        func.coalesce(Order.to_pay_amount, 0) +
+        func.coalesce(Order.credit_amount, 0) +
+        func.coalesce(Order.freight_charge, 0) +
+        func.coalesce(Order.freight_gst, 0) +
+        func.coalesce(Order.insurance, 0) +
+        func.coalesce(Order.regional_area, 0)
+    )
+
     rows = (
         await db.execute(
             select(
                 Consignee.name,
                 Order.payment_method,
                 func.count(Order.id),
-                func.coalesce(func.sum(Order.shipping_charge), 0),
+                func.coalesce(func.sum(derived_amount), 0),
                 func.coalesce(func.sum(Order.cod_amount), 0),
                 func.coalesce(func.sum(Order.freight_charge), 0),
                 func.coalesce(func.sum(Order.freight_gst), 0),
+                func.coalesce(func.sum(Order.insurance), 0),
+                func.coalesce(func.sum(Order.regional_area), 0),
             )
             .join(Consignee, Order.consignee_id == Consignee.id)
             .where(and_(*filters))
             .group_by(Consignee.name, Order.payment_method)
-            .order_by(func.coalesce(func.sum(Order.shipping_charge), 0).desc())
+            .order_by(func.coalesce(func.sum(derived_amount), 0).desc())
         )
     ).all()
 
@@ -290,6 +323,8 @@ async def customer_wise_booking_report(
             "fuel_surcharge": _to_float(float(row[5]) - (float(row[5]) / 1.52)) if row[5] else 0.0,
             "gst_amount": _to_float(row[6]),
             "pending_amount": _to_float(row[4]),
+            "insurance": _to_float(row[7]),
+            "regional_area": _to_float(row[8]),
         }
         for row in rows
     ]
@@ -338,15 +373,28 @@ async def service_type_report(
     )
 
     filters = _order_filters(scoped_franchise_id, start_date, end_date, scoped_warehouse_id, payment_method)
+    derived_amount = (
+        func.coalesce(Order.cod_amount, 0) +
+        func.coalesce(Order.prepaid_amount, 0) +
+        func.coalesce(Order.to_pay_amount, 0) +
+        func.coalesce(Order.credit_amount, 0) +
+        func.coalesce(Order.freight_charge, 0) +
+        func.coalesce(Order.freight_gst, 0) +
+        func.coalesce(Order.insurance, 0) +
+        func.coalesce(Order.regional_area, 0)
+    )
+
     rows = (
         await db.execute(
             select(
                 Order.service_type,
                 Order.payment_method,
                 func.count(Order.id),
-                func.coalesce(func.sum(Order.shipping_charge), 0),
+                func.coalesce(func.sum(derived_amount), 0),
                 func.coalesce(func.sum(Order.freight_charge), 0),
                 func.coalesce(func.sum(Order.freight_gst), 0),
+                func.coalesce(func.sum(Order.insurance), 0),
+                func.coalesce(func.sum(Order.regional_area), 0),
             )
             .where(and_(*filters))
             .group_by(Order.service_type, Order.payment_method)
@@ -362,6 +410,8 @@ async def service_type_report(
             "base_freight": _to_float(float(row[4]) / 1.52) if row[4] else 0.0,
             "fuel_surcharge": _to_float(float(row[4]) - (float(row[4]) / 1.52)) if row[4] else 0.0,
             "gst_amount": _to_float(row[5]),
+            "insurance": _to_float(row[6]),
+            "regional_area": _to_float(row[7]),
         }
         for row in rows
     ]
