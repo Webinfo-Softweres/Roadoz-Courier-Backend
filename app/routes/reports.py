@@ -40,6 +40,7 @@ from app.services.report_service import (
     performance_dashboard_report,
     month_end_closing_report,
     tripsheet_report,
+    parcel_order_report,
 )
 from app.services.export_service import export_to_csv, export_to_excel, export_to_pdf
 
@@ -538,4 +539,25 @@ async def tripsheet_report_endpoint(
     _: User = Depends(require_permission("orders:view")),
 ):
     data = await tripsheet_report(db, current_user, date_from, date_to, franchise_id)
+    return format_report_response(data, format)
+
+
+@router.get("/parcel-orders")
+async def parcel_orders_report_endpoint(
+    date_from: date | None = Query(None, description="Start date (YYYY-MM-DD)"),
+    date_to: date | None = Query(None, description="End date (YYYY-MM-DD)"),
+    franchise_id: str | None = Query(None, description="Filter by franchise (Admin only)"),
+    format: str = Query("json", description="Response format: json, csv, excel, pdf"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("parcel:view")),
+):
+    """
+    Generate a Parcel Orders report.
+    - Admin: sees all orders. Can filter by franchise_id.
+    - Franchise user: sees only their franchise orders.
+    - Warehouse user: sees only their warehouse orders.
+    Supports: json, csv, excel, pdf export.
+    """
+    data = await parcel_order_report(db, current_user, date_from, date_to, franchise_id)
     return format_report_response(data, format)
