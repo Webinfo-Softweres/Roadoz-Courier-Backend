@@ -256,11 +256,11 @@ asyncio.run(validate())
         print("\n  ⚠ Schema validation skipped (no DATABASE_URL)")
         return True, []
     else:
-        print(f"\n  ⚠ Schema validation inconclusive:")
+        print(f"\n  ✗ Schema validation script CRASHED:")
         print(f"    stdout: {out[:500]}")
         print(f"    stderr: {err[:500]}")
-        # Don't fail deployment for validation script errors
-        return True, []
+        # Fail fast and block deployment on script crash (e.g. missing dependencies)
+        return False, ["Validation script crashed or output was unrecognized"]
 
 
 def main():

@@ -102,7 +102,6 @@ jobs:
             echo "  ✓ No idempotency warnings"
           fi
 
-          echo ""
           echo "============================================"
           echo "✓ ALL MIGRATION CHECKS PASSED"
           echo "============================================"
