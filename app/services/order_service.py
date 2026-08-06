@@ -240,24 +240,40 @@ async def generate_bag_number(db, pincode: str):
 
 async def _generate_order_number(db: AsyncSession) -> str:
     """Generate a sequential order number safely."""
-    # Find the maximum existing order number to prevent 409 Conflicts after deletions
-    result = await db.execute(
+    from app.models.parcel_order import ParcelOrder
+    
+    # Find the maximum existing order number in Order table
+    result_order = await db.execute(
         select(Order.order_number)
         .where(Order.order_number.like("ORD-%"))
         .order_by(Order.order_number.desc())
         .limit(1)
     )
-    last_order = result.scalar_one_or_none()
-    if not last_order:
+    last_order = result_order.scalar_one_or_none()
+    
+    # Find the maximum existing order number in ParcelOrder table
+    result_parcel = await db.execute(
+        select(ParcelOrder.order_number)
+        .where(ParcelOrder.order_number.like("ORD-%"))
+        .order_by(ParcelOrder.order_number.desc())
+        .limit(1)
+    )
+    last_parcel = result_parcel.scalar_one_or_none()
+    
+    def extract_num(num_str: str) -> int:
+        if not num_str:
+            return 0
+        try:
+            return int(num_str.split("-")[1])
+        except Exception:
+            return 0
+            
+    max_num = max(extract_num(last_order), extract_num(last_parcel))
+    
+    if max_num == 0:
         return "ORD-00001"
         
-    try:
-        last_num = int(last_order.split("-")[1])
-        return f"ORD-{str(last_num + 1).zfill(5)}"
-    except Exception:
-        # Fallback just in case
-        count = (await db.execute(select(func.count()).select_from(Order))).scalar_one()
-        return f"ORD-{str(count + 1).zfill(5)}"
+    return f"ORD-{str(max_num + 1).zfill(5)}"
 
 
 def _compute_weight_summary(packages: list[OrderPackage]) -> WeightSummary:

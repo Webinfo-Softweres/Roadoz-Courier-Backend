@@ -34,8 +34,6 @@ from app.schemas.order import (
     OrderStatusListResponse,
     OrderUpdate,
     ManualFreightUpdate,
-    
-
 )
 from app.models.user_role import UserRole
 from app.models.role import Role
