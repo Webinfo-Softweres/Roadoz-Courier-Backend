@@ -231,9 +231,9 @@ async def daily_booking_report(
             "payment_method_amount": _to_float(payment_val),
             "insurance": _to_float(insurance),
             "regional_area": _to_float(regional_area),
-            "totalamount": _to_float(amount),
             "base_freight": _to_float(freight_charge) if freight_charge else 0.0,
             "gst_amount": _to_float(freight_gst),
+            "totalamount": _to_float(amount),
             "status": _status_value(order.status),
             "payment_method": order.payment_method,
         })
