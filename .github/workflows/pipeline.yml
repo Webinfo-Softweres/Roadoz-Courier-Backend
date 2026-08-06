@@ -157,7 +157,7 @@ jobs:
   # This job satisfies branch protection rules on PRs to main.
   # Do not rename the job ID 'deploy-staging' without updating GitHub settings.
   deploy-staging:
-    name: PR Status Check
+    name: deploy-staging
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     needs: [migration-check, syntax-check]
