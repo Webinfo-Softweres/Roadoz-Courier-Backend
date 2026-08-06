@@ -218,10 +218,10 @@ async def create_permission_endpoint(
 @router.get("/permissions", response_model=list[PermissionOut])
 async def list_permissions_endpoint(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     __: User = Depends(require_permission("permissions:view")),
 ):
-    return await list_permissions(db)
+    return await list_permissions(db, current_user)
 
 
 @router.put("/permissions/{permission_id}", response_model=PermissionOut)

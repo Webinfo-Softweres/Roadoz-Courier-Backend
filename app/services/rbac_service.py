@@ -782,8 +782,24 @@ async def create_permission(db: AsyncSession, data: PermissionCreateRequest) -> 
     return PermissionOut.model_validate(perm)
 
 
-async def list_permissions(db: AsyncSession) -> list[PermissionOut]:
-    result = await db.execute(select(Permission).order_by(Permission.module.asc(), Permission.action.asc()))
+async def list_permissions(db: AsyncSession, current_user: User) -> list[PermissionOut]:
+    from app.services.order_service import _resolve_franchise_id, _resolve_warehouse_id
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+    is_global = not franchise_id and not warehouse_id
+
+    query = select(Permission).order_by(Permission.module.asc(), Permission.action.asc())
+
+    if not is_global:
+        from app.dependencies.role_checker import get_user_permissions
+        user_perms_codes = await get_user_permissions(db, current_user.id)
+        if user_perms_codes:
+            query = query.where(Permission.code.in_(user_perms_codes))
+        else:
+            # If the user has no permissions, return an empty list directly
+            return []
+
+    result = await db.execute(query)
     perms = result.scalars().all()
     return [PermissionOut.model_validate(p) for p in perms]
 
