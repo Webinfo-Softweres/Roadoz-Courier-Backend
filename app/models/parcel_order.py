@@ -64,6 +64,7 @@ class ParcelOrder(Base):
     freight_charge: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True, server_default=text("0"))
     freight_gst: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True, server_default=text("0"))
     total_freight: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True, server_default=text("0"))
+    extra_charge: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True, server_default=text("0"))
 
     # Package dimensions (single package – simple parcel)
     weight_kg: Mapped[Optional[float]] = mapped_column(Numeric(10, 3), nullable=True)

@@ -2504,3 +2504,73 @@ async def tripsheet_report(
             "total_packages": total_packages
         }
     }
+
+
+async def parcel_order_report(
+    db: AsyncSession,
+    current_user: User,
+    date_from=None,
+    date_to=None,
+    franchise_id_filter=None,
+) -> dict:
+    from app.models.parcel_order import ParcelOrder
+    from app.services.order_service import _resolve_franchise_id, _resolve_warehouse_id
+
+    resolved_franchise_id = await _resolve_franchise_id(db, current_user)
+    resolved_warehouse_id = await _resolve_warehouse_id(db, current_user)
+
+    filters = []
+    if resolved_franchise_id:
+        filters.append(ParcelOrder.franchise_id == resolved_franchise_id)
+    elif resolved_warehouse_id:
+        filters.append(ParcelOrder.warehouse_id == resolved_warehouse_id)
+
+    # Admin can filter by franchise_id via query param
+    if franchise_id_filter and not resolved_franchise_id and not resolved_warehouse_id:
+        filters.append(ParcelOrder.franchise_id == franchise_id_filter)
+
+    if date_from:
+        filters.append(ParcelOrder.created_at >= datetime.combine(date_from, datetime.min.time()))
+    if date_to:
+        filters.append(ParcelOrder.created_at <= datetime.combine(date_to, datetime.max.time()))
+
+    where = and_(*filters) if filters else True
+    rows = (await db.execute(
+        select(ParcelOrder).where(where).order_by(ParcelOrder.created_at.desc())
+    )).scalars().all()
+
+    items = []
+    total_freight = 0.0
+    total_extra = 0.0
+
+    for r in rows:
+        tf = _to_float(r.total_freight)
+        ec = _to_float(r.extra_charge)
+        total_freight += tf
+        total_extra += ec
+        items.append({
+            "order_number": r.order_number or "",
+            "date": r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "",
+            "status": r.status or "",
+            "sender_name": r.sender_name or "",
+            "sender_city": r.sender_city or "",
+            "receiver_name": r.receiver_name or "",
+            "receiver_city": r.receiver_city or "",
+            "payment_method": r.payment_method or "",
+            "service_type": r.service_type or "",
+            "freight_charge": _to_float(r.freight_charge),
+            "freight_gst": _to_float(r.freight_gst),
+            "total_freight": tf,
+            "extra_charge": ec,
+        })
+
+    return {
+        "report": "Parcel Orders Report",
+        "date_from": str(date_from) if date_from else None,
+        "date_to": str(date_to) if date_to else None,
+        "items": items,
+        "totals": {
+            "total_freight": total_freight,
+            "extra_charge": total_extra,
+        }
+    }
