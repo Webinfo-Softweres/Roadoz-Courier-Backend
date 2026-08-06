@@ -39,7 +39,17 @@ jobs:
             python seed_month_end_closing_perm.py
             python seed_fleet_driver_perm.py
             sudo systemctl restart roadoz
+            sleep 5
             sudo systemctl is-active roadoz
+            echo "=== Post-deploy health check ==="
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/)
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "✗ Health check FAILED: HTTP $HTTP_CODE"
+              echo "=== Recent error logs ==="
+              sudo journalctl -u roadoz --no-pager -n 30 | grep -i -E 'error|traceback|exception' | grep -v 'closing socket' | tail -10
+              exit 1
+            fi
+            echo "✓ Health check passed: HTTP $HTTP_CODE"
 
   deploy-production:
     if: github.ref == 'refs/heads/main'
@@ -73,4 +83,14 @@ jobs:
             python seed_month_end_closing_perm.py
             python seed_fleet_driver_perm.py
             sudo systemctl restart roadoz
+            sleep 5
             sudo systemctl is-active roadoz
+            echo "=== Post-deploy health check ==="
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/)
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "✗ Health check FAILED: HTTP $HTTP_CODE"
+              echo "=== Recent error logs ==="
+              sudo journalctl -u roadoz --no-pager -n 30 | grep -i -E 'error|traceback|exception' | grep -v 'closing socket' | tail -10
+              exit 1
+            fi
+            echo "✓ Health check passed: HTTP $HTTP_CODE"

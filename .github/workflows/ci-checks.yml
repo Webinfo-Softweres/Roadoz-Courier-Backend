@@ -1,0 +1,162 @@
+name: CI Checks
+
+on:
+  # Catch problems early — when developer pushes to staging
+  push:
+    branches:
+      - staging
+  # Double-check before production merge
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  migration-check:
+    name: Migration Safety Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt -q
+          pip install alembic sqlalchemy -q
+
+      - name: Check migration chain integrity
+        run: |
+          set -o pipefail
+          echo "============================================"
+          echo "MIGRATION CHAIN INTEGRITY CHECK"
+          echo "============================================"
+          echo ""
+
+          # 1. Verify no multiple heads (branched migrations)
+          ALEMBIC_OUTPUT=$(alembic heads 2>&1)
+          if [ $? -ne 0 ]; then
+            echo "✗ FAIL: alembic heads crashed"
+            echo "$ALEMBIC_OUTPUT"
+            exit 1
+          fi
+          
+          HEADS=$(echo "$ALEMBIC_OUTPUT" | grep -c '[a-f0-9]\{12\}' || true)
+          if [ "$HEADS" -gt 1 ]; then
+            echo "✗ FAIL: Multiple migration heads detected ($HEADS heads)"
+            echo "  You must merge migration branches before deploying."
+            echo "  Run: alembic merge heads -m 'merge_branches'"
+            echo "$ALEMBIC_OUTPUT"
+            exit 1
+          fi
+          echo "✓ Single migration head — no branches"
+
+          # 2. Verify the full chain resolves without errors
+          HISTORY_OUTPUT=$(alembic history --verbose 2>&1)
+          if [ $? -ne 0 ]; then
+            echo "✗ FAIL: Migration history chain is broken"
+            echo "$HISTORY_OUTPUT" | tail -20
+            exit 1
+          fi
+          echo "✓ Migration chain is intact"
+
+          # 3. Check that all migration files referenced in the chain exist
+          REVISIONS=$(echo "$HISTORY_OUTPUT" | grep -oP 'Rev:\s+\K[a-f0-9]{12,}')
+          MISSING=0
+          for REV in $REVISIONS; do
+            FILE=$(find alembic/versions/ -name "${REV}*" -not -path '*__pycache__*' 2>/dev/null)
+            if [ -z "$FILE" ]; then
+              echo "✗ Missing migration file for revision: $REV"
+              MISSING=$((MISSING + 1))
+            fi
+          done
+          if [ "$MISSING" -gt 0 ]; then
+            echo "✗ FAIL: $MISSING migration file(s) are missing"
+            exit 1
+          fi
+          echo "✓ All migration files present"
+
+          # 4. Check that each migration has safe patterns
+          echo ""
+          echo "Checking migration safety patterns..."
+          WARNINGS=0
+          for FILE in alembic/versions/*.py; do
+            [ -f "$FILE" ] || continue
+            BASENAME=$(basename "$FILE")
+            # Skip merge revisions
+            if grep -q "mergepoint\|Merges:" "$FILE" 2>/dev/null; then
+              continue
+            fi
+            if grep -q "op.add_column" "$FILE" && ! grep -q "op.f\|batch_alter\|column_exists\|has_column\|IF NOT EXISTS" "$FILE"; then
+              echo "  ⚠ $BASENAME: add_column without existence check (may fail on re-run)"
+              WARNINGS=$((WARNINGS + 1))
+            fi
+          done
+          if [ "$WARNINGS" -gt 0 ]; then
+            echo "  ℹ $WARNINGS migration(s) could be made more idempotent (warning only)"
+          else
+            echo "  ✓ No idempotency warnings"
+          fi
+
+          echo ""
+          echo "============================================"
+          echo "✓ ALL MIGRATION CHECKS PASSED"
+          echo "============================================"
+
+  syntax-check:
+    name: Python Syntax Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check Python syntax
+        run: |
+          echo "============================================"
+          echo "PYTHON SYNTAX CHECK"
+          echo "============================================"
+          ERRORS=0
+          # Compile every .py file — catches syntax errors, bad indentation, etc.
+          for FILE in $(find app/ -name '*.py' -not -path '*__pycache__*'); do
+            python -m py_compile "$FILE" 2>/dev/null
+            if [ $? -ne 0 ]; then
+              echo "✗ Syntax error: $FILE"
+              python -m py_compile "$FILE" 2>&1 | tail -5
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+          # Also check migration files
+          for FILE in $(find alembic/versions/ -name '*.py' -not -path '*__pycache__*'); do
+            python -m py_compile "$FILE" 2>/dev/null
+            if [ $? -ne 0 ]; then
+              echo "✗ Syntax error: $FILE"
+              python -m py_compile "$FILE" 2>&1 | tail -5
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+          if [ "$ERRORS" -gt 0 ]; then
+            echo ""
+            echo "✗ FAIL: $ERRORS file(s) have syntax errors"
+            exit 1
+          fi
+          echo "✓ All Python files have valid syntax"
+
+  # This job name must stay as 'deploy-staging' to satisfy the existing
+  # branch protection rule on 'main'. If you update the branch protection
+  # settings in GitHub, you can rename this to 'status-check'.
+  deploy-staging:
+    name: Pre-Merge Status Check
+    runs-on: ubuntu-latest
+    needs: [migration-check, syntax-check]
+    steps:
+      - run: echo "All CI checks passed. Safe to merge."
