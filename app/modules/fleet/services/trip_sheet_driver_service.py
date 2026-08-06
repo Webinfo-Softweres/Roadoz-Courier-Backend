@@ -7,7 +7,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.order import Order, OrderStatus
+from app.models.order import Order
 from app.models.trip_sheet import TripSheet, TripSheetOrder
 from app.modules.fleet.constants import (
     SHEET_ACTIVE_STATUSES,
@@ -96,11 +96,8 @@ async def respond_to_sheet(
     if action == "ACCEPT":
         sheet.driver_status = SHEET_STATUS_ACCEPTED
         sheet.accepted_at = datetime.utcnow()
-        for trip_order in sheet.orders or []:
-            order = trip_order.order
-            if order and order.status not in TERMINAL_ORDER_STATUSES:
-                order.previous_status = order.status
-                order.status = OrderStatus.OFD.value
+        # Keep order.status unchanged — admin ops status must not jump to Ofd on accept.
+        # Pickup → Picked via verify-pickup; Ofd via ARRIVED_AT_DROP.
         await db.flush()
         return {
             "tripSheetId": sheet.id,
