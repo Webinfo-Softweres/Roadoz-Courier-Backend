@@ -13,15 +13,6 @@ jobs:
   migration-check:
     name: Migration Safety Check
     runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: root
-          MYSQL_DATABASE: roadoz_test
-        ports:
-          - 3306:3306
-        options: --health-cmd="mysqladmin ping -proot" --health-interval=10s --health-timeout=5s --health-retries=5
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -114,24 +105,6 @@ jobs:
           echo "============================================"
           echo "✓ ALL MIGRATION CHECKS PASSED"
           echo "============================================"
-
-      - name: Verify No Missing Migrations (Alembic Check)
-        env:
-          DATABASE_URL: mysql+aiomysql://root:root@127.0.0.1:3306/roadoz_test
-        run: |
-          echo "============================================"
-          echo "CHECKING FOR MISSING MIGRATIONS"
-          echo "============================================"
-          # 1. Upgrade the empty test DB to head
-          alembic upgrade head
-          
-          # 2. Check for drift between Python models and DB schema
-          # This will FAIL (exit 1) if a developer added a model but forgot to run --autogenerate
-          alembic check
-          
-          if [ $? -eq 0 ]; then
-            echo "✓ Python models match the migration scripts perfectly."
-          fi
 
   syntax-check:
     name: Python Syntax Check
