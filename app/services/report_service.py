@@ -233,11 +233,11 @@ async def daily_booking_report(
             "regional_area": _to_float(regional_area),
             "base_freight": _to_float(freight_charge) if freight_charge else 0.0,
             "gst_amount": _to_float(freight_gst),
-            "totalamount": _to_float(amount),
+            "amount": _to_float(amount),
             "status": _status_value(order.status),
             "payment_method": order.payment_method,
         })
-    total_amount = _to_float(sum(item["totalamount"] for item in items))
+    total_amount = _to_float(sum(item["amount"] for item in items))
 
     return {
         "report": "Daily Booking Report",

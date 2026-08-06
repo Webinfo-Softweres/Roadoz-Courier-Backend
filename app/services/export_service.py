@@ -18,20 +18,20 @@ REPORT_CONFIGS = {
     "Daily Booking Report": {
         "headers": [
             "Booking No", "Sender", "Receiver", "Destination", "Weight (kg)",
-            "PM Amount", "Insurance", "Regional Area", "Base Freight", "Fuel Surcharge", "GST Amount", "Total Amount", "Status", "Payment Method"
+            "PM Amount", "Insurance", "Regional Area", "Base Freight", "GST Amount", "Total Amount", "Status", "Payment Method"
         ],
         "keys": [
-            "booking_no", "sender", "receiver", "destination", "weight", 
-            "payment_method_amount", "insurance", "regional_area", "base_freight", "fuel_surcharge", "gst_amount", "amount", "status", "payment_method"
+            "booking_no", "sender", "receiver", "destination", "weight",
+            "payment_method_amount", "insurance", "regional_area", "base_freight", "gst_amount", "amount", "status", "payment_method"
         ]
     },
     "Customer Wise Booking Report": {
-        "headers": ["Customer", "Payment Method", "Bookings", "Base Freight", "Fuel Surcharge", "GST", "Insurance", "Regional Area", "Pending Amount", "Total Revenue"],
-        "keys": ["customer", "payment_method", "bookings", "base_freight", "fuel_surcharge", "gst_amount", "insurance", "regional_area", "pending_amount", "revenue"]
+        "headers": ["Customer", "Payment Method", "Bookings", "Base Freight", "GST", "Insurance", "Regional Area", "Pending Amount", "Total Revenue"],
+        "keys": ["customer", "payment_method", "bookings", "base_freight", "gst_amount", "insurance", "regional_area", "pending_amount", "revenue"]
     },
     "Service Type Report": {
-        "headers": ["Service Type", "Payment Method", "Total Bookings", "Base Freight", "Fuel Surcharge", "GST", "Insurance", "Regional Area", "Total Revenue"],
-        "keys": ["service_type", "payment_method", "total_bookings", "base_freight", "fuel_surcharge", "gst_amount", "insurance", "regional_area", "revenue"]
+        "headers": ["Service Type", "Payment Method", "Total Bookings", "Base Freight", "GST", "Insurance", "Regional Area", "Total Revenue"],
+        "keys": ["service_type", "payment_method", "total_bookings", "base_freight", "gst_amount", "insurance", "regional_area", "revenue"]
     },
     "Delivery Status Report": {
         "headers": ["AWB No", "Receiver", "Delivery Date", "Status", "POD"],
