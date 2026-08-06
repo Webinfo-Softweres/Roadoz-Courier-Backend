@@ -18,6 +18,7 @@ from app.routes import auth, franchise, profile, websocket, rbac, order, remitta
 from app.routes import auth, franchise, profile, websocket, rbac, order, remittance, invoice,warehouse, activity_log,consigeeauth,coningeereview,webconfiguration, analytics,user_admincommunication, rate_calculator, reports, prints, operations, location
 from app.routes import bulk_order, bag,label,user_franchise,consigeeuserorder, month_end_closing
 from app.routes import franchise_orders
+from app.routes import parcel_order as parcel_order_routes
 from app.routes import pickup_assignment as pickup_assignment_routes
 from app.routes import delivery_assignment as delivery_assignment_routes
 
@@ -514,6 +515,7 @@ app.include_router(fleet_admin.router, prefix="/api/v1/int/fleet")
 app.include_router(fleet_management.router, prefix=API_PREFIX)
 
 app.include_router(location.router,prefix=API_PREFIX)
+app.include_router(parcel_order_routes.router, prefix=API_PREFIX)
 
 
 

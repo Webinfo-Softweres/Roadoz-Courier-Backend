@@ -1,0 +1,257 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - staging
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  migration-check:
+    name: Migration Safety Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt -q
+          pip install alembic sqlalchemy -q
+
+      - name: Check migration chain integrity
+        run: |
+          set -o pipefail
+          echo "============================================"
+          echo "MIGRATION CHAIN INTEGRITY CHECK"
+          echo "============================================"
+          echo ""
+
+          # 1. Verify no multiple heads (branched migrations)
+          ALEMBIC_OUTPUT=$(alembic heads 2>&1)
+          if [ $? -ne 0 ]; then
+            echo "✗ FAIL: alembic heads crashed"
+            echo "$ALEMBIC_OUTPUT"
+            exit 1
+          fi
+          
+          HEADS=$(echo "$ALEMBIC_OUTPUT" | grep -c '[a-f0-9]\{12\}' || true)
+          if [ "$HEADS" -gt 1 ]; then
+            echo "✗ FAIL: Multiple migration heads detected ($HEADS heads)"
+            echo "  You must merge migration branches before deploying."
+            echo "  Run: alembic merge heads -m 'merge_branches'"
+            echo "$ALEMBIC_OUTPUT"
+            exit 1
+          fi
+          echo "✓ Single migration head — no branches"
+
+          # 2. Verify the full chain resolves without errors
+          HISTORY_OUTPUT=$(alembic history --verbose 2>&1)
+          if [ $? -ne 0 ]; then
+            echo "✗ FAIL: Migration history chain is broken"
+            echo "$HISTORY_OUTPUT" | tail -20
+            exit 1
+          fi
+          echo "✓ Migration chain is intact"
+
+          # 3. Check that all migration files referenced in the chain exist
+          REVISIONS=$(echo "$HISTORY_OUTPUT" | grep -oP 'Rev:\s+\K[a-f0-9]{12,}')
+          MISSING=0
+          for REV in $REVISIONS; do
+            FILE=$(find alembic/versions/ -name "${REV}*" -not -path '*__pycache__*' 2>/dev/null)
+            if [ -z "$FILE" ]; then
+              echo "✗ Missing migration file for revision: $REV"
+              MISSING=$((MISSING + 1))
+            fi
+          done
+          if [ "$MISSING" -gt 0 ]; then
+            echo "✗ FAIL: $MISSING migration file(s) are missing"
+            exit 1
+          fi
+          echo "✓ All migration files present"
+
+          # 4. Check that each migration has safe patterns
+          echo ""
+          echo "Checking migration safety patterns..."
+          WARNINGS=0
+          for FILE in alembic/versions/*.py; do
+            [ -f "$FILE" ] || continue
+            BASENAME=$(basename "$FILE")
+            # Skip merge revisions
+            if grep -q "mergepoint\|Merges:" "$FILE" 2>/dev/null; then
+              continue
+            fi
+            if grep -q "op.add_column" "$FILE" && ! grep -q "op.f\|batch_alter\|column_exists\|has_column\|IF NOT EXISTS" "$FILE"; then
+              echo "  ⚠ $BASENAME: add_column without existence check (may fail on re-run)"
+              WARNINGS=$((WARNINGS + 1))
+            fi
+          done
+          if [ "$WARNINGS" -gt 0 ]; then
+            echo "  ℹ $WARNINGS migration(s) could be made more idempotent (warning only)"
+          else
+            echo "  ✓ No idempotency warnings"
+          fi
+
+          echo ""
+          echo "============================================"
+          echo "✓ ALL MIGRATION CHECKS PASSED"
+          echo "============================================"
+
+  syntax-check:
+    name: Python Syntax Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check Python syntax
+        run: |
+          echo "============================================"
+          echo "PYTHON SYNTAX CHECK"
+          echo "============================================"
+          ERRORS=0
+          # Compile every .py file — catches syntax errors, bad indentation, etc.
+          for FILE in $(find app/ -name '*.py' -not -path '*__pycache__*'); do
+            python -m py_compile "$FILE" 2>/dev/null
+            if [ $? -ne 0 ]; then
+              echo "✗ Syntax error: $FILE"
+              python -m py_compile "$FILE" 2>&1 | tail -5
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+          # Also check migration files
+          for FILE in $(find alembic/versions/ -name '*.py' -not -path '*__pycache__*'); do
+            python -m py_compile "$FILE" 2>/dev/null
+            if [ $? -ne 0 ]; then
+              echo "✗ Syntax error: $FILE"
+              python -m py_compile "$FILE" 2>&1 | tail -5
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+          if [ "$ERRORS" -gt 0 ]; then
+            echo ""
+            echo "✗ FAIL: $ERRORS file(s) have syntax errors"
+            exit 1
+          fi
+          echo "✓ All Python files have valid syntax"
+
+  # =========================================================================
+  # DEPLOYMENT STAGES (Only run if CI checks pass)
+  # =========================================================================
+
+  # This job satisfies branch protection rules on PRs to main.
+  # Do not rename the job ID 'deploy-staging' without updating GitHub settings.
+  deploy-staging:
+    name: deploy-staging
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    needs: [migration-check, syntax-check]
+    steps:
+      - run: echo "All CI checks passed. Safe to merge."
+
+  deploy-to-staging:
+    name: Deploy to Staging
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    needs: [migration-check, syntax-check]
+    steps:
+      - name: Deploy to Staging Server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 15.207.220.194
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd ~/Roadoz-Courier-Backend
+            git fetch origin staging
+            CHANGED=$(git diff HEAD origin/staging -- requirements.txt | wc -l)
+            git reset --hard origin/staging
+            source venv/bin/activate
+            if [ "$CHANGED" -gt "0" ]; then
+              echo "requirements.txt changed, running pip install..."
+              grep -v "aiomysql" requirements.txt | pip install -r /dev/stdin -q
+              python -c "import aiomysql; exit(0 if not aiomysql.__version__.startswith('0.2') else 1)" || pip install "aiomysql @ git+https://github.com/aio-libs/aiomysql.git@1aa9cfcba" --no-deps -q
+            else
+              echo "requirements.txt unchanged, skipping pip install."
+            fi
+            echo "Running database migrations..."
+            python safe_migrate.py
+            echo "Running database seeders..."
+            python seed_warehouse_role.py
+            python seed_franchise_invoice_perm.py
+            python seed_month_end_closing_perm.py
+            python seed_fleet_driver_perm.py
+            sudo systemctl restart roadoz
+            sleep 5
+            sudo systemctl is-active roadoz
+            echo "=== Post-deploy health check ==="
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/)
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "✗ Health check FAILED: HTTP $HTTP_CODE"
+              echo "=== Recent error logs ==="
+              sudo journalctl -u roadoz --no-pager -n 30 | grep -i -E 'error|traceback|exception' | grep -v 'closing socket' | tail -10
+              exit 1
+            fi
+            echo "✓ Health check passed: HTTP $HTTP_CODE"
+
+  deploy-to-production:
+    name: Deploy to Production
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    needs: [migration-check, syntax-check]
+    steps:
+      - name: Deploy to Production Server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 52.66.93.248
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd ~/Roadoz-Courier-Backend
+            git fetch origin main
+            CHANGED=$(git diff HEAD origin/main -- requirements.txt | wc -l)
+            git reset --hard origin/main
+            source venv/bin/activate
+            if [ "$CHANGED" -gt "0" ]; then
+              echo "requirements.txt changed, running pip install..."
+              grep -v "aiomysql" requirements.txt | pip install -r /dev/stdin -q
+              python -c "import aiomysql; exit(0 if not aiomysql.__version__.startswith('0.2') else 1)" || pip install "aiomysql @ git+https://github.com/aio-libs/aiomysql.git@1aa9cfcba" --no-deps -q
+            else
+              echo "requirements.txt unchanged, skipping pip install."
+            fi
+            echo "Running database migrations..."
+            python safe_migrate.py
+            echo "Running database seeders..."
+            python seed_warehouse_role.py
+            python seed_franchise_invoice_perm.py
+            python seed_month_end_closing_perm.py
+            python seed_fleet_driver_perm.py
+            sudo systemctl restart roadoz
+            sleep 5
+            sudo systemctl is-active roadoz
+            echo "=== Post-deploy health check ==="
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/)
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "✗ Health check FAILED: HTTP $HTTP_CODE"
+              echo "=== Recent error logs ==="
+              sudo journalctl -u roadoz --no-pager -n 30 | grep -i -E 'error|traceback|exception' | grep -v 'closing socket' | tail -10
+              exit 1
+            fi
+            echo "✓ Health check passed: HTTP $HTTP_CODE"

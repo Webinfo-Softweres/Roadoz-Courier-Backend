@@ -33,6 +33,7 @@ from app.models.user_admincommunication import AdminandUserMessage
 from app.models.warehouse import OrderWarehouseAddress
 from app.models.webconfiguration import WebConfiguration
 from app.models.trip_sheet import TripSheet, TripSheetOrder
+from app.models.parcel_order import ParcelOrder  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)

@@ -38,3 +38,4 @@ from app.models.pickup_assignment import PickupAssignment
 from app.models.delivery_assignment import DeliveryAssignment
 
 from app.models.razorpay_transaction import RazorpayTransaction
+from app.models import parcel_order
