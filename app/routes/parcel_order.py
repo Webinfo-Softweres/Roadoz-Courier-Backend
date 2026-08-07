@@ -21,6 +21,7 @@ from app.schemas.parcel_order import (
     ParcelOrderUpdate,
     ParcelOrderOut,
     ParcelOrderListResponse,
+    ParcelOrderBarcodeListRequest,
 )
 
 router = APIRouter(prefix="/parcel-orders", tags=["Parcel Orders"])
@@ -58,6 +59,38 @@ async def _generate_parcel_number(db: AsyncSession) -> str:
 
 def _to_parcel_out(parcel: ParcelOrder) -> ParcelOrderOut:
     return ParcelOrderOut.model_validate(parcel)
+
+
+@router.post("/by-barcodes", response_model=list[ParcelOrderOut])
+async def list_parcel_orders_by_barcodes(
+    request: ParcelOrderBarcodeListRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("parcel:view")),
+):
+    """
+    Fetch a list of ParcelOrders given their barcodes.
+    Applies RBAC filtering based on franchise/warehouse.
+    """
+    if not request.barcodes:
+        return []
+
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    warehouse_id = await _resolve_warehouse_id(db, current_user)
+    filters = _scope_filters(franchise_id, warehouse_id)
+
+    query = select(ParcelOrder).where(
+        or_(
+            ParcelOrder.barcode.in_(request.barcodes),
+            ParcelOrder.order_number.in_(request.barcodes)
+        )
+    )
+    if filters:
+        query = query.where(and_(*filters))
+
+    result = await db.execute(query)
+    orders = result.scalars().all()
+    return [_to_parcel_out(o) for o in orders]
 
 
 # ── CREATE ───────────────────────────────────────────────────────────────────
@@ -144,6 +177,7 @@ async def create_parcel_order(
         freight_charge=data.freight_charge,
         freight_gst=data.freight_gst,
         total_freight=data.total_freight,
+        extra_charge=data.extra_charge,
 
         # Package
         weight_kg=data.weight_kg,

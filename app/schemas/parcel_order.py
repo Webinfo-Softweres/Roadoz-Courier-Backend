@@ -71,6 +71,7 @@ class ParcelOrderCreate(BaseModel):
     freight_charge: Optional[float] = Field(0, ge=0)
     freight_gst: Optional[float] = Field(0, ge=0)
     total_freight: Optional[float] = Field(0, ge=0)
+    extra_charge: Optional[float] = Field(0, ge=0)
 
     # Package info
     weight_kg: Optional[float] = Field(None, ge=0)
@@ -111,6 +112,7 @@ class ParcelOrderUpdate(BaseModel):
     freight_charge: Optional[float] = Field(None, ge=0)
     freight_gst: Optional[float] = Field(None, ge=0)
     total_freight: Optional[float] = Field(None, ge=0)
+    extra_charge: Optional[float] = Field(None, ge=0)
 
     weight_kg: Optional[float] = Field(None, ge=0)
     length_cm: Optional[float] = Field(None, ge=0)
@@ -181,6 +183,7 @@ class ParcelOrderOut(BaseModel):
     freight_charge: Optional[float] = None
     freight_gst: Optional[float] = None
     total_freight: Optional[float] = None
+    extra_charge: Optional[float] = None
 
     # Package
     weight_kg: Optional[float] = None
@@ -218,3 +221,6 @@ class ParcelOrderListResponse(BaseModel):
     page: int
     limit: int
     pages: int
+
+class ParcelOrderBarcodeListRequest(BaseModel):
+    barcodes: List[str] = Field(..., description="List of parcel order barcodes")

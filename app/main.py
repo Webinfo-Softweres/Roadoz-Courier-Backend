@@ -21,6 +21,7 @@ from app.routes import franchise_orders
 from app.routes import parcel_order as parcel_order_routes
 from app.routes import pickup_assignment as pickup_assignment_routes
 from app.routes import delivery_assignment as delivery_assignment_routes
+from app.routes import parcel_tripsheet as parcel_tripsheet_routes
 
 from app.routes import public as public_routes
 from app.modules.fleet.routes import mobile as fleet_mobile
@@ -194,6 +195,12 @@ DEFAULT_PERMISSIONS = [
     ("parcel", "view", "Reject orders"),  
     ("parcel", "edit", "parcel orders"),
     ("parcel", "delete", "Reject orders"),   
+    
+    
+    ("parcelorder", "create", "parcel orders"),
+    ("parcelorder", "view", "Reject orders"),  
+    ("parcelorder", "edit", "parcel orders"),
+    ("parcelorder", "delete", "Reject orders"),
     
     
 ]
@@ -524,6 +531,7 @@ app.include_router(fleet_management.router, prefix=API_PREFIX)
 
 app.include_router(location.router,prefix=API_PREFIX)
 app.include_router(parcel_order_routes.router, prefix=API_PREFIX)
+app.include_router(parcel_tripsheet_routes.router, prefix=API_PREFIX)
 
 
 
