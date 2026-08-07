@@ -109,7 +109,7 @@ async def create_parcel_sender(
     data: ParcelSenderCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: User = Depends(require_permission("parcel:create")),
+    _: User = Depends(require_permission("parcelsenders:create")),
 ):
     franchise_id = await _resolve_franchise_id(db, current_user)
     warehouse_id = await _resolve_warehouse_id(db, current_user)
@@ -133,7 +133,7 @@ async def list_parcel_senders(
     search: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: User = Depends(require_permission("parcel:view")),
+    _: User = Depends(require_permission("parcelsenders:view")),
 ):
     franchise_id = await _resolve_franchise_id(db, current_user)
     warehouse_id = await _resolve_warehouse_id(db, current_user)
@@ -177,7 +177,7 @@ async def get_parcel_sender(
     sender_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: User = Depends(require_permission("parcel:view")),
+    _: User = Depends(require_permission("parcelsenders:view")),
 ):
     sender = (await db.execute(select(ParcelSender).where(ParcelSender.id == sender_id))).scalar_one_or_none()
     if not sender:
@@ -201,7 +201,7 @@ async def update_parcel_sender(
     data: ParcelSenderUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: User = Depends(require_permission("parcel:edit")),
+    _: User = Depends(require_permission("parcelsenders:edit")),
 ):
     sender = (await db.execute(select(ParcelSender).where(ParcelSender.id == sender_id))).scalar_one_or_none()
     if not sender:
@@ -230,7 +230,7 @@ async def delete_parcel_sender(
     sender_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: User = Depends(require_permission("parcel:delete")),
+    _: User = Depends(require_permission("parcelsenders:delete")),
 ):
     sender = (await db.execute(select(ParcelSender).where(ParcelSender.id == sender_id))).scalar_one_or_none()
     if not sender:
@@ -257,7 +257,7 @@ async def create_parcel_receiver(
     data: ParcelReceiverCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: User = Depends(require_permission("parcel:create")),
+    _: User = Depends(require_permission("receiverparcel:create")),
 ):
     franchise_id = await _resolve_franchise_id(db, current_user)
     warehouse_id = await _resolve_warehouse_id(db, current_user)
@@ -281,7 +281,7 @@ async def list_parcel_receivers(
     search: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: User = Depends(require_permission("parcel:view")),
+    _: User = Depends(require_permission("receiverparcel:view")),
 ):
     franchise_id = await _resolve_franchise_id(db, current_user)
     warehouse_id = await _resolve_warehouse_id(db, current_user)
@@ -325,7 +325,7 @@ async def get_parcel_receiver(
     receiver_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: User = Depends(require_permission("parcel:view")),
+    _: User = Depends(require_permission("receiverparcel:view")),
 ):
     receiver = (await db.execute(select(ParcelReceiver).where(ParcelReceiver.id == receiver_id))).scalar_one_or_none()
     if not receiver:
@@ -349,7 +349,7 @@ async def update_parcel_receiver(
     data: ParcelReceiverUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: User = Depends(require_permission("parcel:edit")),
+    _: User = Depends(require_permission("receiverparcel:edit")),
 ):
     receiver = (await db.execute(select(ParcelReceiver).where(ParcelReceiver.id == receiver_id))).scalar_one_or_none()
     if not receiver:
@@ -378,7 +378,7 @@ async def delete_parcel_receiver(
     receiver_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: User = Depends(require_permission("parcel:delete")),
+    _: User = Depends(require_permission("receiverparcel:delete")),
 ):
     receiver = (await db.execute(select(ParcelReceiver).where(ParcelReceiver.id == receiver_id))).scalar_one_or_none()
     if not receiver:
