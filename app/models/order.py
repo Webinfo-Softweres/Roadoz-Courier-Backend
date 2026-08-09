@@ -109,6 +109,11 @@ class Order(Base):
     # Product summary
     order_value: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
 
+    # Razorpay Payment QR
+    razorpay_qr_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    razorpay_qr_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    razorpay_qr_upi_uri: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     # Package summary (computed at creation)
     total_weight_kg: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, server_default=text("0"))
     total_vol_weight_kg: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, server_default=text("0"))
@@ -156,6 +161,12 @@ class Order(Base):
     # Status
     previous_status: Mapped[Optional[str]] = mapped_column(String(150),nullable=True)
     status: Mapped[str] = mapped_column(String(150), nullable=False, server_default=text("'Processing'"))
+    
+    # Cancellation Details
+    cancellation_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    cancellation_phase: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    
     # status: Mapped[OrderStatus] = mapped_column(
     #             SqlEnum(OrderStatus),
     #             nullable=False,

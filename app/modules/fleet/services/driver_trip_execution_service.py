@@ -41,15 +41,25 @@ async def update_order_status(
         order.status = OrderStatus.OFD.value
     elif new_status == "PICKUP_COMPLETED":
         order.status = OrderStatus.PICKED.value
+    elif new_status == "CANCELLED":
+        order.status = OrderStatus.CANCELLED.value
+        order.cancellation_reason = payload.reason
+        order.cancellation_phase = payload.phase
+        order.cancelled_at = payload.timestamp or datetime.utcnow()
     await mark_sheet_in_progress(db, sheet)
     await db.flush()
-    return {
+    
+    response_data = {
         "tripId": order.id,
         "tripSheetId": sheet.id,
         "status": new_status,
         "orderStatus": order.status,
         "updatedAt": datetime.utcnow().isoformat(),
     }
+    if new_status == "CANCELLED":
+        response_data["reason"] = payload.reason
+        
+    return response_data
 
 
 async def verify_pickup(
