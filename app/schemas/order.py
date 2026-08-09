@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, model_validator, computed_field
+from pydantic import BaseModel, Field, model_validator, computed_field, field_validator
 from typing import Optional, List, Literal
 from datetime import datetime
 from enum import Enum
@@ -336,7 +336,13 @@ class OrderOut(BaseModel):
     pickup_address: PickupAddressOut
     consignee: ConsigneeOut
     payment_method: str
-    payment_status:str 
+    payment_status: Optional[str] = None
+
+    @field_validator("payment_status", mode="before")
+    @classmethod
+    def default_payment_status(cls, v):
+        """Return actual DB value if present, fallback to Payment_pending if None/null."""
+        return v if v is not None else "Payment_pending"
     cod_amount: Optional[float] = None
     to_pay_amount: Optional[float] = None
     credit_amount: Optional[float] = None
