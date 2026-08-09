@@ -100,11 +100,17 @@ class Order(Base):
     bag_orders = relationship("BagOrder", back_populates="order",cascade="all, delete-orphan", lazy="selectin")
     # Payment
     payment_method: Mapped[str] = mapped_column(String(20), nullable=False)  # COD | Prepaid | To Pay | Credit
+    payment_status: Mapped[str | None] = mapped_column(String(50), nullable=True, server_default=text("'Payment_pending'"))  # Payment_pending | created | paid | failed
     cod_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)  # required when COD
     prepaid_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)  # required when Prepaid
     to_pay_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)  # required when To Pay
     credit_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)  # required when Credit
     rov: Mapped[str] = mapped_column(String(20), nullable=False)  # owner_risk | carrier_risk
+
+    # Razorpay Payment QR
+    razorpay_qr_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    razorpay_qr_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    razorpay_qr_upi_uri: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Product summary
     order_value: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
@@ -156,23 +162,17 @@ class Order(Base):
     # Status
     previous_status: Mapped[Optional[str]] = mapped_column(String(150),nullable=True)
     status: Mapped[str] = mapped_column(String(150), nullable=False, server_default=text("'Processing'"))
-    payment_status: Mapped[str | None] = mapped_column(String(50), nullable=True, server_default=text("'Payment_pending'"))
-    
-    # Razorpay QR fields
-    razorpay_qr_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    razorpay_qr_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    razorpay_qr_upi_uri: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    
-    # Cancellation fields
-    cancellation_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    cancellation_phase: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    
     # status: Mapped[OrderStatus] = mapped_column(
     #             SqlEnum(OrderStatus),
     #             nullable=False,
     #             default=OrderStatus.PROCESSING
     #         )
+
+    # Cancellation Details (POD Exception)
+    cancellation_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    cancellation_phase: Mapped[str | None] = mapped_column(String(50), nullable=True)   # PICKUP | DELIVERY
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_by: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
