@@ -79,6 +79,8 @@ class TripStatusUpdateRequest(BaseModel):
     status: str
     location: Optional[dict] = None
     timestamp: Optional[datetime] = None
+    reason: Optional[str] = None
+    phase: Optional[str] = None
 
 
 class VerifyPickupRequest(BaseModel):
@@ -145,3 +147,14 @@ class ResetPasswordRequest(BaseModel):
 class ResendOtpRequest(BaseModel):
     phone: str
     purpose: str = "login"
+
+
+class PaymentQRResponse(BaseModel):
+    qr_id: str
+    image_url: str
+    amount: float
+    status: str
+
+
+class PaymentStatusResponse(BaseModel):
+    status: str
