@@ -162,6 +162,18 @@ class Order(Base):
     # Status
     previous_status: Mapped[Optional[str]] = mapped_column(String(150),nullable=True)
     status: Mapped[str] = mapped_column(String(150), nullable=False, server_default=text("'Processing'"))
+    payment_status: Mapped[str | None] = mapped_column(String(50), nullable=True, server_default=text("'Payment_pending'"))
+    
+    # Razorpay QR fields
+    razorpay_qr_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    razorpay_qr_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    razorpay_qr_upi_uri: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    
+    # Cancellation fields
+    cancellation_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    cancellation_phase: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    
     # status: Mapped[OrderStatus] = mapped_column(
     #             SqlEnum(OrderStatus),
     #             nullable=False,
