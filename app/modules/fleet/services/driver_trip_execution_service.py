@@ -33,14 +33,60 @@ async def update_order_status(
     db: AsyncSession, driver: Driver, order_id: str, payload: TripStatusUpdateRequest
 ) -> dict:
     sheet, order = await get_order_on_driver_sheet(db, driver, order_id)
-    new_status = payload.status
+    new_status = (payload.status or "").strip().upper()
+
+    if new_status in {"CANCELLED", "CANCEL"}:
+        if order.status in TERMINAL_ORDER_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Order is already in a terminal status",
+            )
+        reason = (payload.reason or "").strip()
+        if not reason:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="reason is required when status is CANCELLED",
+            )
+        phase = (payload.phase or "").strip().upper()
+        if phase not in {"PICKUP", "DELIVERY"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="phase must be PICKUP or DELIVERY when status is CANCELLED",
+            )
+        cancelled_at = payload.timestamp or datetime.utcnow()
+        order.previous_status = order.status
+        order.status = OrderStatus.CANCELLED.value
+        meta = dict(order.meta or {})
+        meta["cancellation"] = {
+            "reason": reason,
+            "phase": phase,
+            "timestamp": cancelled_at.isoformat(),
+            "location": payload.location,
+            "driverId": driver.id,
+        }
+        order.meta = meta
+        await maybe_complete_sheet(db, sheet)
+        await db.flush()
+        return {
+            "tripId": order.id,
+            "status": "CANCELLED",
+            "reason": reason,
+            "updatedAt": cancelled_at.isoformat(),
+            "message": "Trip status updated to CANCELLED successfully.",
+        }
+
     order.previous_status = order.status
-    if new_status in {"IN_TRANSIT", "In_transit"}:
+    if new_status in {"IN_TRANSIT"}:
         order.status = OrderStatus.IN_TRANSIT.value
     elif new_status in {"ARRIVED_AT_DROP", "DELIVERY_COMPLETED"}:
         order.status = OrderStatus.OFD.value
     elif new_status == "PICKUP_COMPLETED":
         order.status = OrderStatus.PICKED.value
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported status. Use IN_TRANSIT, ARRIVED_AT_DROP, PICKUP_COMPLETED, or CANCELLED",
+        )
     await mark_sheet_in_progress(db, sheet)
     await db.flush()
     return {
@@ -50,7 +96,6 @@ async def update_order_status(
         "orderStatus": order.status,
         "updatedAt": datetime.utcnow().isoformat(),
     }
-
 
 async def verify_pickup(
     db: AsyncSession, driver: Driver, order_id: str, payload: VerifyPickupRequest

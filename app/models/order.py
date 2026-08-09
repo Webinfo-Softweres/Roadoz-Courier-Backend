@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Numeric, Integer, text
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Numeric, Integer, text, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import Optional
 from app.core.database import Base
@@ -150,6 +150,7 @@ class Order(Base):
     #             nullable=False,
     #             default=OrderStatus.PROCESSING
     #         )
+    meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_by: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )

@@ -120,7 +120,9 @@ async def trip_status(
     driver: Driver = Depends(require_driver),
     db: AsyncSession = Depends(get_db),
 ):
-    return SuccessDataResponse(success=True, data=await update_order_status(db, driver, order_id, payload))
+    data = await update_order_status(db, driver, order_id, payload)
+    message = data.pop("message", None)
+    return SuccessDataResponse(success=True, message=message, data=data)
 
 
 @router.post("/trips/{order_id}/verify-pickup", response_model=SuccessDataResponse)
