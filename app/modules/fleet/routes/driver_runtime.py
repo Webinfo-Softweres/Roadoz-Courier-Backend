@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -120,7 +120,9 @@ async def trip_status(
     driver: Driver = Depends(require_driver),
     db: AsyncSession = Depends(get_db),
 ):
-    return SuccessDataResponse(success=True, data=await update_order_status(db, driver, order_id, payload))
+    data = await update_order_status(db, driver, order_id, payload)
+    message = data.pop("message", None)
+    return SuccessDataResponse(success=True, message=message, data=data)
 
 
 @router.post("/trips/{order_id}/verify-pickup", response_model=SuccessDataResponse)
@@ -282,168 +284,3 @@ async def scan_execute(
         success=True,
         data=await execute_scan_for_driver(db, driver, barcode, payload.latitude, payload.longitude),
     )
-
-
-
-
-
-
-
-
-
-
-# payment integration 
-
-
-
-
-
-
-
-
-from app.modules.fleet.schemas.trip_sheet_driver import PaymentQRResponse, PaymentStatusResponse
-from app.services.payment_service import payment_service
-from app.models.order import Order, PaymentStatus
-from app.models.razorpay_transaction import RazorpayTransaction
-import json
-
-@router.post("/orders/{order_id}/payment/qr", response_model=PaymentQRResponse)
-async def create_driver_payment_qr(
-    order_id: str,
-    db: AsyncSession = Depends(get_db),
-    driver: Driver = Depends(require_driver),
-):
-    result = await db.execute(select(Order).where(Order.id == order_id))
-    order = result.scalar_one_or_none()
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-
-    # Support both COD and "To Pay" payment methods
-    payment_methods_requiring_collection = ["COD", "To Pay"]
-    if order.payment_method not in payment_methods_requiring_collection:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Order payment_method '{order.payment_method}' does not require driver collection. Only COD or 'To Pay' orders need QR payment.",
-        )
-
-    if order.payment_status == PaymentStatus.PAID.value:
-        raise HTTPException(
-            status_code=400,
-            detail="Order payment is already completed",
-        )
-
-    amount = float(order.to_pay_amount or 0) if order.payment_method == "To Pay" else float(order.cod_amount or 0)
-
-    if amount <= 0:
-        raise HTTPException(
-            status_code=400,
-            detail="Payment amount must be greater than zero",
-        )
-
-    # Idempotency check: if QR already generated and not paid, return it.
-    if order.razorpay_qr_id and order.razorpay_qr_url:
-        return PaymentQRResponse(
-            qr_id=order.razorpay_qr_id,
-            image_url=order.razorpay_qr_url,
-            amount=amount,
-            status=order.payment_status or "pending"
-        )
-
-    try:
-        qr = payment_service.create_upi_qr(
-            amount=amount,
-            order_id=order.id,
-            description=f"Payment for Order {order.order_number}",
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-    order.razorpay_qr_id = qr.get("id")
-    order.razorpay_qr_url = qr.get("image_url")
-    order.payment_status = PaymentStatus.CREATED.value  # "created"
-
-    await db.commit()
-    await db.refresh(order)
-
-    return PaymentQRResponse(
-        qr_id=order.razorpay_qr_id,
-        image_url=order.razorpay_qr_url,
-        amount=amount,
-        status=order.payment_status
-    )
-
-
-@router.get("/orders/{order_id}/payment/status", response_model=PaymentStatusResponse)
-async def get_driver_payment_status(
-    order_id: str,
-    db: AsyncSession = Depends(get_db),
-    driver: Driver = Depends(require_driver),
-):
-    result = await db.execute(select(Order).where(Order.id == order_id))
-    order = result.scalar_one_or_none()
-
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-
-    return PaymentStatusResponse(status=order.payment_status or "pending")
-
-
-@router.post("/payments/razorpay/webhook")
-async def razorpay_webhook(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    body = await request.body()
-    signature = request.headers.get("x-razorpay-signature")
-
-    if not signature:
-        raise HTTPException(status_code=400, detail="Missing signature")
-
-    # Verify signature
-    is_valid = payment_service.validate_webhook_signature(body.decode("utf-8"), signature)
-    if not is_valid:
-        raise HTTPException(status_code=400, detail="Invalid signature")
-
-    payload = json.loads(body)
-    event = payload.get("event")
-
-    if event in ["qr_code.credited", "payment.captured"]:
-        payment_entity = payload["payload"]["payment"]["entity"]
-        
-        if event == "qr_code.credited":
-            # qr code entity has the notes
-            notes = payload["payload"]["qr_code"]["entity"].get("notes", {})
-        else:
-            notes = payment_entity.get("notes", {})
-
-        order_id = notes.get("order_id")
-        if not order_id:
-            return {"status": "ignored", "reason": "No order_id in notes"}
-
-        amount_captured = payment_entity.get("amount", 0) / 100.0  # Convert paise to INR
-        razorpay_payment_id = payment_entity.get("id")
-
-        result = await db.execute(select(Order).where(Order.id == order_id))
-        order = result.scalar_one_or_none()
-
-        if order and order.payment_status != PaymentStatus.PAID.value:
-            expected_amount = float(order.to_pay_amount or 0) if order.payment_method == "To Pay" else float(order.cod_amount or 0)
-            
-            # Allow minor variations or exact match
-            if amount_captured >= expected_amount:
-                order.payment_status = PaymentStatus.PAID.value
-
-                # Record transaction
-                transaction = RazorpayTransaction(
-                    order_id=order.id,
-                    razorpay_order_id=order.razorpay_qr_id or "qr_unknown",
-                    razorpay_payment_id=razorpay_payment_id,
-                    amount=amount_captured,
-                    status="paid"
-                )
-                db.add(transaction)
-                await db.commit()
-            else:
-                return {"status": "error", "reason": "Partial payment"}
-
-    return {"status": "ok"}
