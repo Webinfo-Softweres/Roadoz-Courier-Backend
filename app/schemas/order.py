@@ -336,13 +336,7 @@ class OrderOut(BaseModel):
     pickup_address: PickupAddressOut
     consignee: ConsigneeOut
     payment_method: str
-    payment_status: Optional[str] = None
-
-    @field_validator("payment_status", mode="before")
-    @classmethod
-    def default_payment_status(cls, v):
-        """Return actual DB value if present, fallback to Payment_pending if None/null."""
-        return v if v is not None else "Payment_pending"
+    payment_status: Optional[str] = "Payment_pending"
     cod_amount: Optional[float] = None
     to_pay_amount: Optional[float] = None
     credit_amount: Optional[float] = None
